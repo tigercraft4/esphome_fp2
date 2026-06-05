@@ -51,18 +51,33 @@ CONF_SENSITIVITY = "sensitivity"
 # New Options
 CONF_RADAR_RESET_PIN = "radar_reset_pin"
 CONF_PRESENCE_SENSITIVITY = "presence_sensitivity"
+CONF_FALL_DETECTION = "fall_detection"
 CONF_FALL_DETECTION_SENSITIVITY = "fall_detection_sensitivity"
+CONF_SLEEP_REPORT_ENABLE = "sleep_report_enable"
+CONF_POSTURE_REPORT_ENABLE = "posture_report_enable"
 CONF_PEOPLE_COUNTING_REPORT_ENABLE = "people_counting_report_enable"
 CONF_PEOPLE_NUMBER_ENABLE = "people_number_enable"
 CONF_TARGET_TYPE_ENABLE = "target_type_enable"
 CONF_DWELL_TIME_ENABLE = "dwell_time_enable"
 CONF_WALKING_DISTANCE_ENABLE = "walking_distance_enable"
+CONF_THERMODYNAMIC_CHART_ENABLE = "thermodynamic_chart_enable"
 CONF_TARGET_TRACKING = "target_tracking"
 CONF_LOCATION_REPORT_SWITCH = "location_report_switch"
 CONF_RADAR_TEMPERATURE = "radar_temperature"
+CONF_REALTIME_PEOPLE_NUMBER = "realtime_people_number"
+CONF_ONTIME_PEOPLE_NUMBER = "ontime_people_number"
+CONF_REALTIME_PEOPLE_COUNTING = "realtime_people_counting"
+CONF_WALKING_DISTANCE = "walking_distance"
+CONF_SLEEP_PRESENCE = "sleep_presence"
+CONF_SLEEP_INOUT_STATE = "sleep_inout_state"
+CONF_SLEEP_STATE = "sleep_state"
+CONF_SLEEP_EVENT = "sleep_event"
+CONF_TARGET_POSTURE = "target_posture"
 CONF_PRESENCE = "presence"
 CONF_GLOBAL_ZONE = "global_zone"
 CONF_RADAR_SOFTWARE_VERSION = "radar_software_version"
+CONF_RADAR_DEBUG = "radar_debug"
+CONF_DEBUG_PROBE_READS = "debug_probe_reads"
 
 MOUNTING_POSITIONS = {
     "wall": 0x01,
@@ -181,6 +196,16 @@ CONFIG_SCHEMA = (
             ),
 
             cv.Optional(CONF_LEFT_RIGHT_REVERSE, default=False): cv.boolean,
+            cv.Optional(CONF_FALL_DETECTION): cv.boolean,
+            cv.Optional(CONF_FALL_DETECTION_SENSITIVITY): cv.enum(SENSITIVITY_LEVELS),
+            cv.Optional(CONF_SLEEP_REPORT_ENABLE): cv.boolean,
+            cv.Optional(CONF_POSTURE_REPORT_ENABLE): cv.boolean,
+            cv.Optional(CONF_PEOPLE_COUNTING_REPORT_ENABLE, default=True): cv.boolean,
+            cv.Optional(CONF_PEOPLE_NUMBER_ENABLE, default=True): cv.boolean,
+            cv.Optional(CONF_TARGET_TYPE_ENABLE, default=True): cv.boolean,
+            cv.Optional(CONF_DWELL_TIME_ENABLE, default=False): cv.boolean,
+            cv.Optional(CONF_WALKING_DISTANCE_ENABLE, default=False): cv.boolean,
+            cv.Optional(CONF_THERMODYNAMIC_CHART_ENABLE, default=True): cv.boolean,
             cv.Optional(CONF_INTERFERENCE_GRID): parse_ascii_grid,
             cv.Optional(CONF_EXIT_GRID): parse_ascii_grid,
             cv.Optional(CONF_EDGE_GRID): parse_ascii_grid,
@@ -201,6 +226,14 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_RADAR_SOFTWARE_VERSION): text_sensor_.text_sensor_schema(
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             ),
+            cv.Optional(CONF_RADAR_DEBUG): text_sensor_.text_sensor_schema(
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            ).extend(
+                {
+                    cv.Optional(CONF_DISABLED_BY_DEFAULT, default=True): cv.boolean,
+                }
+            ),
+            cv.Optional(CONF_DEBUG_PROBE_READS, default=False): cv.boolean,
             cv.Optional(CONF_RADAR_TEMPERATURE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_CELSIUS,
                 icon=ICON_THERMOMETER,
@@ -208,6 +241,42 @@ CONFIG_SCHEMA = (
                 device_class=DEVICE_CLASS_TEMPERATURE,
                 state_class=STATE_CLASS_MEASUREMENT,
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            ),
+            cv.Optional(CONF_REALTIME_PEOPLE_NUMBER): sensor.sensor_schema(
+                icon="mdi:counter",
+                accuracy_decimals=0,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_ONTIME_PEOPLE_NUMBER): sensor.sensor_schema(
+                icon="mdi:counter",
+                accuracy_decimals=0,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_REALTIME_PEOPLE_COUNTING): sensor.sensor_schema(
+                icon="mdi:counter",
+                accuracy_decimals=0,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_WALKING_DISTANCE): sensor.sensor_schema(
+                icon="mdi:walk",
+                accuracy_decimals=0,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_SLEEP_PRESENCE): binary_sensor.binary_sensor_schema(
+                device_class=DEVICE_CLASS_OCCUPANCY,
+                icon="mdi:bed",
+            ),
+            cv.Optional(CONF_SLEEP_INOUT_STATE): binary_sensor.binary_sensor_schema(
+                icon="mdi:bed",
+            ),
+            cv.Optional(CONF_SLEEP_STATE): text_sensor_.text_sensor_schema(
+                icon="mdi:sleep",
+            ),
+            cv.Optional(CONF_SLEEP_EVENT): text_sensor_.text_sensor_schema(
+                icon="mdi:sleep",
+            ),
+            cv.Optional(CONF_TARGET_POSTURE): text_sensor_.text_sensor_schema(
+                icon="mdi:human",
             ),
         }
     )
@@ -217,7 +286,17 @@ CONFIG_SCHEMA = (
 
 SENSOR_MAP = {
     CONF_RADAR_TEMPERATURE: (sensor.new_sensor, "set_radar_temperature_sensor"),
+    CONF_REALTIME_PEOPLE_NUMBER: (sensor.new_sensor, "set_realtime_people_number_sensor"),
+    CONF_ONTIME_PEOPLE_NUMBER: (sensor.new_sensor, "set_ontime_people_number_sensor"),
+    CONF_REALTIME_PEOPLE_COUNTING: (sensor.new_sensor, "set_realtime_people_counting_sensor"),
+    CONF_WALKING_DISTANCE: (sensor.new_sensor, "set_walking_distance_sensor"),
     CONF_RADAR_SOFTWARE_VERSION: (text_sensor_.new_text_sensor, "set_radar_software_sensor"),
+    CONF_RADAR_DEBUG: (text_sensor_.new_text_sensor, "set_radar_debug_sensor"),
+    CONF_SLEEP_STATE: (text_sensor_.new_text_sensor, "set_sleep_state_sensor"),
+    CONF_SLEEP_EVENT: (text_sensor_.new_text_sensor, "set_sleep_event_sensor"),
+    CONF_TARGET_POSTURE: (text_sensor_.new_text_sensor, "set_target_posture_sensor"),
+    CONF_SLEEP_PRESENCE: (binary_sensor.new_binary_sensor, "set_sleep_presence_sensor"),
+    CONF_SLEEP_INOUT_STATE: (binary_sensor.new_binary_sensor, "set_sleep_inout_sensor"),
     CONF_LOCATION_REPORT_SWITCH: (switch.new_switch, "set_location_report_switch"),
     CONF_TARGET_TRACKING: (text_sensor_.new_text_sensor, "set_target_tracking_sensor"),
 
@@ -266,6 +345,25 @@ async def to_code(config):
 
     cg.add(var.set_mounting_position(config[CONF_MOUNTING_POSITION]))
     cg.add(var.set_left_right_reverse(config[CONF_LEFT_RIGHT_REVERSE]))
+    cg.add(var.set_debug_probe_reads(config[CONF_DEBUG_PROBE_READS]))
+    cg.add(var.set_people_counting_report_enable(config[CONF_PEOPLE_COUNTING_REPORT_ENABLE]))
+    cg.add(var.set_people_number_enable(config[CONF_PEOPLE_NUMBER_ENABLE]))
+    cg.add(var.set_target_type_enable(config[CONF_TARGET_TYPE_ENABLE]))
+    cg.add(var.set_dwell_time_enable(config[CONF_DWELL_TIME_ENABLE]))
+    cg.add(var.set_walking_distance_enable(config[CONF_WALKING_DISTANCE_ENABLE]))
+    cg.add(var.set_thermodynamic_chart_enable(config[CONF_THERMODYNAMIC_CHART_ENABLE]))
+
+    if CONF_FALL_DETECTION in config:
+        cg.add(var.set_fall_detection(config[CONF_FALL_DETECTION]))
+
+    if CONF_FALL_DETECTION_SENSITIVITY in config:
+        cg.add(var.set_fall_detection_sensitivity(config[CONF_FALL_DETECTION_SENSITIVITY]))
+
+    if CONF_SLEEP_REPORT_ENABLE in config:
+        cg.add(var.set_sleep_report_enable(config[CONF_SLEEP_REPORT_ENABLE]))
+
+    if CONF_POSTURE_REPORT_ENABLE in config:
+        cg.add(var.set_posture_report_enable(config[CONF_POSTURE_REPORT_ENABLE]))
 
     if CONF_GLOBAL_ZONE in config:
         global_zone_conf = config[CONF_GLOBAL_ZONE]

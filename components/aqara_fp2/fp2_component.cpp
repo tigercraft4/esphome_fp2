@@ -26,6 +26,130 @@ static uint16_t crc16(const uint8_t *data, size_t len) {
   return crc;
 }
 
+const char* FP2Component::attr_id_to_string_(AttrId attr_id) {
+  switch (attr_id) {
+    case AttrId::RADAR_HW_VERSION: return "radar_hw_version";
+    case AttrId::RADAR_SW_VERSION: return "radar_sw_version";
+    case AttrId::MOTION_DETECT: return "motion_detection";
+    case AttrId::PRESENCE_DETECT: return "presence_detection";
+    case AttrId::MONITOR_MODE: return "monitor_mode";
+    case AttrId::CLOSING_SETTING: return "closing_setting";
+    case AttrId::EDGE_MAP: return "edge_label";
+    case AttrId::ENTRY_EXIT_MAP: return "import_export_label";
+    case AttrId::INTERFERENCE_MAP: return "interference_source";
+    case AttrId::PRESENCE_DETECT_SENSITIVITY: return "presence_detection_sensitivity";
+    case AttrId::LOCATION_REPORT_ENABLE: return "location_report_enable";
+    case AttrId::ZONE_MAP: return "zone_detect_setting";
+    case AttrId::DETECT_ZONE_MOTION: return "detect_zone_motion";
+    case AttrId::WORK_MODE: return "work_mode";
+    case AttrId::LOCATION_TRACKING_DATA: return "location_track_data";
+    case AttrId::ANGLE_SENSOR_DATA: return "angle_sensor_data";
+    case AttrId::FALL_DETECTION: return "fall_detection";
+    case AttrId::LEFT_RIGHT_REVERSE: return "left_right_reverse";
+    case AttrId::FALL_SENSITIVITY: return "fall_detection_sensitivity";
+    case AttrId::RADAR_INTERFERENCE_AUTO_SETTING: return "radar_interference_auto_setting";
+    case AttrId::OTA_SET_FLAG: return "ota_set_flag";
+    case AttrId::TEMPERATURE: return "temperature";
+    case AttrId::FALL_OVERTIME_REPORT_PERIOD: return "fall_overtime_report_period";
+    case AttrId::FALL_OVERTIME_DETECTION: return "fall_overtime_detection";
+    case AttrId::THERMO_EN: return "thermodynamic_chart_enable";
+    case AttrId::INTERFERENCE_AUTO_ENABLE: return "interference_auto_enable";
+    case AttrId::THERMO_DATA: return "thermodynamic_chart_data";
+    case AttrId::ZONE_PRESENCE: return "detect_zone_presence";
+    case AttrId::DEVICE_DIRECTION: return "device_direction";
+    case AttrId::EDGE_AUTO_SETTING: return "edge_auto_setting";
+    case AttrId::EDGE_AUTO_ENABLE: return "edge_auto_enable";
+    case AttrId::ZONE_SENSITIVITY: return "detect_zone_sensitivity";
+    case AttrId::DETECT_ZONE_TYPE: return "detect_zone_type";
+    case AttrId::ZONE_CLOSE_AWAY_ENABLE: return "radar_detect_zone_close_away_enable";
+    case AttrId::TARGET_POSTURE: return "target_posture";
+    case AttrId::PEOPLE_COUNTING: return "people_counting";
+    case AttrId::SLEEP_REPORT_ENABLE: return "sleep_report_enable";
+    case AttrId::POSTURE_REPORT_ENABLE: return "posture_report_enable";
+    case AttrId::PEOPLE_COUNT_REPORT_ENABLE: return "people_counting_report_enable";
+    case AttrId::SLEEP_DATA: return "sleep_data";
+    case AttrId::DELETE_FALSE_TARGET: return "delete_false_target";
+    case AttrId::SLEEP_STATE: return "sleep_state";
+    case AttrId::PEOPLE_NUMBER_ENABLE: return "people_number_enable";
+    case AttrId::TARGET_TYPE_ENABLE: return "target_type_enable";
+    case AttrId::REALTIME_PEOPLE_NUMBER: return "realtime_people_number";
+    case AttrId::ONTIME_PEOPLE_NUMBER: return "ontime_people_number";
+    case AttrId::REALTIME_PEOPLE_COUNTING: return "realtime_people_counting";
+    case AttrId::SLEEP_PRESENCE: return "sleep_presence";
+    case AttrId::SLEEP_MOUNT_POSITION: return "sleep_zone_mount_position";
+    case AttrId::SLEEP_ZONE_SIZE: return "sleep_zone_size";
+    case AttrId::WALL_CORNER_POS: return "wall_corner_mount_position";
+    case AttrId::SLEEP_INOUT_STATE: return "sleep_inout_state";
+    case AttrId::DWELL_TIME_ENABLE: return "dwell_time_enable";
+    case AttrId::WALK_DISTANCE_ENABLE: return "walking_distance_enable";
+    case AttrId::WALK_DISTANCE_ALL: return "walking_distance_all";
+    case AttrId::SLEEP_EVENT: return "sleep_event";
+    case AttrId::DEBUG_LOG: return "debug_log";
+    case AttrId::ZONE_ACTIVATION_LIST: return "aux_data";
+    case AttrId::RADAR_FLASH_ID: return "radar_flash_id";
+    case AttrId::RADAR_ID: return "radar_id";
+    case AttrId::RADAR_CALIBRATION_RESULT: return "radar_calibration_result";
+    default: return "unknown";
+  }
+}
+
+const char* FP2Component::op_code_to_string_(uint8_t type) {
+  switch ((OpCode) type) {
+    case OpCode::RESPONSE: return "response";
+    case OpCode::WRITE: return "write";
+    case OpCode::ACK: return "ack";
+    case OpCode::READ: return "read";
+    case OpCode::REPORT: return "report";
+    default: return "unknown";
+  }
+}
+
+std::string FP2Component::format_payload_hex_(const std::vector<uint8_t> &payload, size_t max_bytes) {
+  static const char hex[] = "0123456789abcdef";
+  std::string out;
+  size_t limit = std::min(max_bytes, payload.size());
+
+  for (size_t i = 0; i < limit; i++) {
+    if (i > 0)
+      out.push_back(' ');
+    out.push_back(hex[(payload[i] >> 4) & 0x0F]);
+    out.push_back(hex[payload[i] & 0x0F]);
+  }
+
+  if (payload.size() > limit)
+    out += " ...";
+
+  return out;
+}
+
+void FP2Component::publish_radar_debug_(const char *event, AttrId attr_id,
+                                        const std::vector<uint8_t> &payload) {
+  ESP_LOGI(TAG, "%s %s (0x%04X) len=%u data=%s",
+           event, attr_id_to_string_(attr_id), (uint16_t) attr_id,
+           static_cast<unsigned>(payload.size()), format_payload_hex_(payload, 96).c_str());
+
+  if (radar_debug_sensor_ == nullptr)
+    return;
+
+  std::string state(event);
+  state += " ";
+  state += attr_id_to_string_(attr_id);
+  state += " 0x";
+  static const char hex[] = "0123456789abcdef";
+  uint16_t attr_raw = (uint16_t) attr_id;
+  state.push_back(hex[(attr_raw >> 12) & 0x0F]);
+  state.push_back(hex[(attr_raw >> 8) & 0x0F]);
+  state.push_back(hex[(attr_raw >> 4) & 0x0F]);
+  state.push_back(hex[attr_raw & 0x0F]);
+  state += " len=";
+  state += std::to_string(payload.size());
+  if (!payload.empty()) {
+    state += " data=";
+    state += format_payload_hex_(payload, 80);
+  }
+  radar_debug_sensor_->publish_state(state);
+}
+
 void FP2Component::setup() {
   ESP_LOGI(TAG, "Setting up Aqara FP2...");
 
@@ -100,16 +224,29 @@ void FP2Component::check_initialization_() {
     enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, global_presence_sensitivity_);
     enqueue_command_(OpCode::WRITE, AttrId::CLOSING_SETTING, (uint8_t) 1);
     enqueue_command_(OpCode::WRITE, AttrId::ZONE_CLOSE_AWAY_ENABLE, (uint16_t) 0x0001);
-    // enqueue_command_(OpCode::WRITE, AttrId::FALL_SENSITIVITY, fall_detection_sensitivity_);
-    enqueue_command_(OpCode::WRITE, AttrId::PEOPLE_COUNT_REPORT_ENABLE, true); // BOOL
-    enqueue_command_(OpCode::WRITE, AttrId::PEOPLE_NUMBER_ENABLE, true); // BOOL
-    enqueue_command_(OpCode::WRITE, AttrId::TARGET_TYPE_ENABLE, true); // BOOL
+    if (has_fall_detection_enabled_) {
+      enqueue_command_(OpCode::WRITE, AttrId::FALL_DETECTION, (uint8_t)(fall_detection_enabled_ ? 1 : 0));
+    }
+    if (has_fall_detection_sensitivity_) {
+      enqueue_command_(OpCode::WRITE, AttrId::FALL_SENSITIVITY, fall_detection_sensitivity_);
+    }
+    if (has_sleep_report_enable_) {
+      enqueue_command_(OpCode::WRITE, AttrId::SLEEP_REPORT_ENABLE, sleep_report_enable_);
+    }
+    if (has_posture_report_enable_) {
+      enqueue_command_(OpCode::WRITE, AttrId::POSTURE_REPORT_ENABLE, posture_report_enable_);
+    }
+    enqueue_command_(OpCode::WRITE, AttrId::PEOPLE_COUNT_REPORT_ENABLE, people_counting_report_enable_);
+    enqueue_command_(OpCode::WRITE, AttrId::PEOPLE_NUMBER_ENABLE, people_number_enable_);
+    enqueue_command_(OpCode::WRITE, AttrId::TARGET_TYPE_ENABLE, target_type_enable_);
     // enqueue_command_(OpCode::WRITE, AttrId::SLEEP_MOUNT_POSITION, (uint8_t) 0); // sleep zone mount pos
     enqueue_command_(OpCode::WRITE, AttrId::WALL_CORNER_POS, mounting_position_);
-    enqueue_command_(OpCode::WRITE, AttrId::DWELL_TIME_ENABLE, (uint8_t) 0); // dwell time enable
-    enqueue_command_(OpCode::WRITE, AttrId::WALK_DISTANCE_ENABLE, (uint8_t) 0); // walking distance enable
-    enqueue_command_(OpCode::WRITE, AttrId::THERMO_EN, true);
-    enqueue_command_(OpCode::WRITE, AttrId::THERMO_DATA, (uint8_t) 1);
+    enqueue_command_(OpCode::WRITE, AttrId::DWELL_TIME_ENABLE, (uint8_t)(dwell_time_enable_ ? 1 : 0));
+    enqueue_command_(OpCode::WRITE, AttrId::WALK_DISTANCE_ENABLE, (uint8_t)(walking_distance_enable_ ? 1 : 0));
+    enqueue_command_(OpCode::WRITE, AttrId::THERMO_EN, thermodynamic_chart_enable_);
+    if (thermodynamic_chart_enable_) {
+      enqueue_command_(OpCode::WRITE, AttrId::THERMO_DATA, (uint8_t) 1);
+    }
 
     // 2. Grids
     if (has_interference_grid_) {
@@ -156,9 +293,13 @@ void FP2Component::check_initialization_() {
         enqueue_command_(OpCode::WRITE, AttrId::ZONE_CLOSE_AWAY_ENABLE, (uint16_t)((zone->id << 8) | 1));
     }
 
-    // enqueue_read_((AttrId) 0x302); // Read radar flash ID attribute
-    // enqueue_read_((AttrId) 0x303); // Read radar ID attribute
-    // enqueue_read_((AttrId) 0x305); // Read radar calibration result attribute
+    if (debug_probe_reads_) {
+      ESP_LOGI(TAG, "Queueing radar debug probe reads");
+      enqueue_read_(AttrId::RADAR_HW_VERSION);
+      enqueue_read_(AttrId::RADAR_FLASH_ID);
+      enqueue_read_(AttrId::RADAR_ID);
+      enqueue_read_(AttrId::RADAR_CALIBRATION_RESULT);
+    }
 
     // 5. Publish grid sensors once initialization completes
     ESP_LOGI(TAG, "Publishing grid sensors: has_edge=%d edge_sensor=%p has_exit=%d exit_sensor=%p has_interference=%d interference_sensor=%p",
@@ -429,7 +570,9 @@ void FP2Component::handle_incoming_byte_(uint8_t byte) {
 void FP2Component::handle_parsed_frame_(uint8_t type, AttrId attr_id,
                                         const std::vector<uint8_t> &payload) {
   OpCode op = (OpCode)type;
-  //ESP_LOGI(TAG, "Received t:%d sub_id:%d", type, sub_id);
+  ESP_LOGV(TAG, "Received %s %s (0x%04X), len=%u",
+           op_code_to_string_(type), attr_id_to_string_(attr_id),
+           (uint16_t) attr_id, static_cast<unsigned>(payload.size()));
 
   switch (op) {
     case OpCode::ACK:
@@ -442,6 +585,7 @@ void FP2Component::handle_parsed_frame_(uint8_t type, AttrId attr_id,
       handle_response_(attr_id, payload);
       break;
     default:
+      publish_radar_debug_("unhandled_opcode", attr_id, payload);
       ESP_LOGW(TAG, "Unhandled OpCode: %d", type);
       break;
   }
@@ -457,6 +601,7 @@ void FP2Component::handle_ack_(AttrId attr_id) {
   } else {
     ESP_LOGW(TAG, "Unexpected ACK 0x%04X (Waiting for 0x%04X)", attr_id,
              (uint16_t) waiting_for_ack_attr_id_);
+    publish_radar_debug_("unexpected_ack", attr_id, std::vector<uint8_t>{});
   }
 }
 
@@ -504,7 +649,9 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
     case AttrId::MOTION_DETECT:
         if (payload.size() == 4 && payload[2]  == 0x00) {
             uint8_t state = payload[3];
-            global_motion_sensor_->publish_state(state == 0);
+            if (global_motion_sensor_ != nullptr) {
+              global_motion_sensor_->publish_state(state == 0);
+            }
             ESP_LOGI(TAG, "Received global motion report: %u", state);
             break;
         }
@@ -512,21 +659,29 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
     case AttrId::PRESENCE_DETECT:
         if (payload.size() == 4 && payload[2]  == 0x00) {
             uint8_t state = payload[3];
-            global_presence_sensor_->publish_state(state != 0);
+            if (global_presence_sensor_ != nullptr) {
+              global_presence_sensor_->publish_state(state != 0);
+            }
             ESP_LOGI(TAG, "Received global presence report: %u", state);
             break;
         }
         break;
 
+    case AttrId::REALTIME_PEOPLE_NUMBER:
+      handle_simple_uint32_report_(payload, realtime_people_number_sensor_, "realtime_people_number");
+      break;
+
     case AttrId::ONTIME_PEOPLE_NUMBER:
-        if (payload.size() == 7 && payload[2]  == 0x02) {
-            uint32_t count = ((uint32_t) payload[3]) << 24
-                | ((uint32_t) payload[4]) << 16
-                | ((uint32_t) payload[5]) << 8
-                | ((uint32_t) payload[6]);
-            ESP_LOGI(TAG, "Received ontime people number report: %u", count);
-        }
-        break;
+      handle_simple_uint32_report_(payload, ontime_people_number_sensor_, "ontime_people_number");
+      break;
+
+    case AttrId::REALTIME_PEOPLE_COUNTING:
+      handle_simple_uint32_report_(payload, realtime_people_counting_sensor_, "realtime_people_counting");
+      break;
+
+    case AttrId::WALK_DISTANCE_ALL:
+      handle_simple_uint32_report_(payload, walking_distance_sensor_, "walking_distance_all");
+      break;
 
     case AttrId::ZONE_PRESENCE:  // Zone Presence
         // Payload: [SubID 2B] [Type 0x01(UINT16)] [ValH] [ValL]
@@ -553,9 +708,39 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
       handle_temperature_report_(payload);
       break;
 
+    case AttrId::DEBUG_LOG:
+      handle_debug_log_report_(payload);
+      break;
+
+    case AttrId::TARGET_POSTURE:
+      handle_target_posture_report_(payload);
+      break;
+
+    case AttrId::THERMO_DATA:
+    case AttrId::PEOPLE_COUNTING:
+    case AttrId::SLEEP_DATA:
+      publish_radar_debug_("radar_report", attr_id, payload);
+      break;
+
+    case AttrId::SLEEP_STATE:
+      handle_sleep_state_report_(payload);
+      break;
+
+    case AttrId::SLEEP_PRESENCE:
+      handle_simple_uint8_binary_report_(payload, sleep_presence_sensor_, "sleep_presence");
+      break;
+
+    case AttrId::SLEEP_INOUT_STATE:
+      handle_simple_uint8_binary_report_(payload, sleep_inout_sensor_, "sleep_inout_state");
+      break;
+
+    case AttrId::SLEEP_EVENT:
+      handle_sleep_event_report_(payload);
+      break;
+
     default:
-      // Unknown report type - already logged in main handler
-      ESP_LOGW(TAG, "Unhandled report 0x%04X", (uint16_t) attr_id);
+      publish_radar_debug_("unhandled_report", attr_id, payload);
+      ESP_LOGW(TAG, "Unhandled report 0x%04X (%s)", (uint16_t) attr_id, attr_id_to_string_(attr_id));
       break;
   }
 }
@@ -609,13 +794,116 @@ void FP2Component::handle_temperature_report_(const std::vector<uint8_t> &payloa
     }
 }
 
+void FP2Component::handle_debug_log_report_(const std::vector<uint8_t> &payload) {
+  if (payload.size() < 5 || payload[2] != 0x05) {
+    publish_radar_debug_("debug_log_malformed", AttrId::DEBUG_LOG, payload);
+    return;
+  }
+
+  uint16_t declared_len = (payload[3] << 8) | payload[4];
+  size_t available_len = payload.size() - 5;
+  size_t text_len = std::min(static_cast<size_t>(declared_len), available_len);
+  std::string text(payload.begin() + 5, payload.begin() + 5 + text_len);
+
+  while (!text.empty() && text.back() == '\0') {
+    text.pop_back();
+  }
+
+  ESP_LOGI(TAG, "Radar debug_log: %s", text.c_str());
+  if (radar_debug_sensor_ != nullptr) {
+    radar_debug_sensor_->publish_state("debug_log " + text);
+  }
+}
+
+void FP2Component::handle_simple_uint32_report_(const std::vector<uint8_t> &payload,
+                                                sensor::Sensor *sensor, const char *name) {
+  if (payload.size() != 7 || payload[2] != 0x02) {
+    publish_radar_debug_("uint32_report_malformed", (AttrId)((payload.size() >= 2) ? ((payload[0] << 8) | payload[1]) : 0), payload);
+    return;
+  }
+
+  uint32_t value = ((uint32_t) payload[3] << 24) |
+                   ((uint32_t) payload[4] << 16) |
+                   ((uint32_t) payload[5] << 8) |
+                   (uint32_t) payload[6];
+  ESP_LOGI(TAG, "%s report: %u", name, value);
+  if (sensor != nullptr) {
+    sensor->publish_state(value);
+  }
+}
+
+void FP2Component::handle_simple_uint8_binary_report_(const std::vector<uint8_t> &payload,
+                                                      binary_sensor::BinarySensor *sensor,
+                                                      const char *name) {
+  if (payload.size() != 4 || (payload[2] != 0x00 && payload[2] != 0x04)) {
+    publish_radar_debug_("uint8_binary_report_malformed", (AttrId)((payload.size() >= 2) ? ((payload[0] << 8) | payload[1]) : 0), payload);
+    return;
+  }
+
+  bool state = payload[3] != 0;
+  ESP_LOGI(TAG, "%s report: %s", name, state ? "ON" : "OFF");
+  if (sensor != nullptr) {
+    sensor->publish_state(state);
+  }
+}
+
+void FP2Component::handle_sleep_state_report_(const std::vector<uint8_t> &payload) {
+  if (payload.size() != 4 || payload[2] != 0x00) {
+    publish_radar_debug_("sleep_state_malformed", AttrId::SLEEP_STATE, payload);
+    return;
+  }
+
+  uint8_t value = payload[3];
+  const char *label = "unknown";
+  switch (value) {
+    case 0: label = "inactive_or_out"; break;
+    case 1: label = "in_bed_or_active"; break;
+  }
+
+  std::string state = std::to_string(value) + ":" + label;
+  ESP_LOGI(TAG, "sleep_state report: %s", state.c_str());
+  if (sleep_state_sensor_ != nullptr) {
+    sleep_state_sensor_->publish_state(state);
+  }
+}
+
+void FP2Component::handle_sleep_event_report_(const std::vector<uint8_t> &payload) {
+  if (payload.size() != 4 || payload[2] != 0x00) {
+    publish_radar_debug_("sleep_event_malformed", AttrId::SLEEP_EVENT, payload);
+    return;
+  }
+
+  std::string state = std::to_string(payload[3]);
+  ESP_LOGI(TAG, "sleep_event report: %s", state.c_str());
+  if (sleep_event_sensor_ != nullptr) {
+    sleep_event_sensor_->publish_state(state);
+  }
+}
+
+void FP2Component::handle_target_posture_report_(const std::vector<uint8_t> &payload) {
+  if (payload.size() != 5 || payload[2] != 0x01) {
+    publish_radar_debug_("target_posture_malformed", AttrId::TARGET_POSTURE, payload);
+    return;
+  }
+
+  uint8_t target_or_zone = payload[3];
+  uint8_t posture = payload[4];
+  std::string state = "id=" + std::to_string(target_or_zone) + " posture=" + std::to_string(posture);
+  ESP_LOGI(TAG, "target_posture report: %s", state.c_str());
+  if (target_posture_sensor_ != nullptr) {
+    target_posture_sensor_->publish_state(state);
+  }
+}
+
 void FP2Component::handle_response_(AttrId attr_id, const std::vector<uint8_t> &payload) {
   // RESPONSE packets with only 2 bytes (just SubID) are Reverse Read Requests from the radar
   if (payload.size() == 2) {
     handle_reverse_read_request_(attr_id);
   } else {
-    // Normal Response with data (currently unused)
-    ESP_LOGD(TAG, "Received Response for 0x%04X with %d bytes", (uint16_t) attr_id, payload.size());
+    publish_radar_debug_("radar_response", attr_id, payload);
+    ESP_LOGD(TAG, "Received Response for 0x%04X (%s) with %u bytes",
+             (uint16_t) attr_id, attr_id_to_string_(attr_id),
+             static_cast<unsigned>(payload.size()));
   }
 }
 
@@ -637,7 +925,9 @@ void FP2Component::handle_reverse_read_request_(AttrId attr_id) {
       break;
 
     default:
-      ESP_LOGW(TAG, "Unknown Reverse Query SubID 0x%04X", (uint16_t) attr_id);
+      publish_radar_debug_("unknown_reverse_query", attr_id, std::vector<uint8_t>{});
+      ESP_LOGW(TAG, "Unknown Reverse Query SubID 0x%04X (%s)",
+               (uint16_t) attr_id, attr_id_to_string_(attr_id));
       break;
   }
 }
@@ -716,7 +1006,7 @@ void FP2Component::enqueue_command_blob2_(
 
 void FP2Component::enqueue_read_(AttrId attr_id) {
     FP2Command cmd;
-    cmd.type = OpCode::RESPONSE;
+    cmd.type = OpCode::READ;
     cmd.attr_id = attr_id;
     cmd.retry_count = 0;
 
@@ -802,6 +1092,17 @@ void FP2Component::dump_config() {
   ESP_LOGCONFIG(TAG, "Aqara FP2:");
   ESP_LOGCONFIG(TAG, "  Mounting Position: %d", mounting_position_);
   ESP_LOGCONFIG(TAG, "  Zones: %d", zones_.size());
+  ESP_LOGCONFIG(TAG, "  People Counting Report: %s", people_counting_report_enable_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  People Number Report: %s", people_number_enable_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Target Type Report: %s", target_type_enable_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Dwell Time Report: %s", dwell_time_enable_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Walking Distance Report: %s", walking_distance_enable_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Thermodynamic Chart Report: %s", thermodynamic_chart_enable_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Sleep Report: %s", has_sleep_report_enable_ ? (sleep_report_enable_ ? "YES" : "NO") : "not configured");
+  ESP_LOGCONFIG(TAG, "  Posture Report: %s", has_posture_report_enable_ ? (posture_report_enable_ ? "YES" : "NO") : "not configured");
+  ESP_LOGCONFIG(TAG, "  Fall Detection: %s", has_fall_detection_enabled_ ? (fall_detection_enabled_ ? "YES" : "NO") : "not configured");
+  ESP_LOGCONFIG(TAG, "  Debug Probe Reads: %s", debug_probe_reads_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Radar Debug Sensor: %s", radar_debug_sensor_ != nullptr ? "configured" : "not configured");
   if (reset_pin_ != nullptr) {
     LOG_PIN("  Reset Pin: ", reset_pin_);
   }

@@ -69,6 +69,20 @@ aqara_fp2:
   mounting_position: left_corner
   left_right_reverse: false
 
+  # Firmware-derived radar report controls.
+  # These mirror stock firmware SubIDs 0x0156-0x0174.
+  people_counting_report_enable: true
+  people_number_enable: true
+  target_type_enable: true
+  dwell_time_enable: false
+  walking_distance_enable: false
+  thermodynamic_chart_enable: true
+  # Optional feature streams. Enable only when you want to experiment with them.
+  # sleep_report_enable: true
+  # posture_report_enable: true
+  # fall_detection: false
+  # fall_detection_sensitivity: medium
+
   target_tracking:
     name: "Targets"
 
@@ -142,6 +156,26 @@ aqara_fp2:
     name: "Radar Software Version"
   radar_temperature:
     name: "Radar Temperature"
+  radar_debug:
+    name: "Radar Debug"
+  realtime_people_number:
+    name: "Realtime People Number"
+  ontime_people_number:
+    name: "Ontime People Number"
+  realtime_people_counting:
+    name: "Realtime People Counting"
+  walking_distance:
+    name: "Walking Distance"
+  sleep_presence:
+    name: "Sleep Presence"
+  sleep_inout_state:
+    name: "Sleep In/Out State"
+  sleep_state:
+    name: "Sleep State"
+  sleep_event:
+    name: "Sleep Event"
+  target_posture:
+    name: "Target Posture"
 
 binary_sensor:
   # Button on the bottom of the device

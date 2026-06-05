@@ -27,6 +27,7 @@ This project provides two main components for working with the Aqara FP2 mmWave 
 - Visual representation of sensor coverage area
 - Zone occupancy and motion detection
 - Interactive web card with full/zoomed display modes
+- Firmware-derived report toggles and diagnostics for people counting, walking distance, sleep state, target posture, and radar debug logs
 
 ---
 
@@ -62,6 +63,38 @@ The FP2 uses a 14×14 grid to map the detection area:
 - `.` = Active detection cell
 - `X` = Zone coverage
 - Grids available: `interference_grid`, `exit_grid`, `edge_label_grid`
+
+### Firmware-Derived Radar Options
+
+The ESPHome component exposes several SubIDs found in the stock firmware dump. Defaults preserve the current component behavior for the already-used report streams.
+
+| Option | Radar SubID | Default | Notes |
+|--------|-------------|---------|-------|
+| `people_counting_report_enable` | `0x0158` | `true` | Enables people-counting reports. |
+| `people_number_enable` | `0x0162` | `true` | Enables current/ontime people-number reports. |
+| `target_type_enable` | `0x0163` | `true` | Stock app labels this as AI Person Detection. |
+| `dwell_time_enable` | `0x0172` | `false` | Enables dwell-time reporting path. |
+| `walking_distance_enable` | `0x0173` | `false` | Enables accumulated walking-distance reports. |
+| `thermodynamic_chart_enable` | `0x0138` | `true` | Enables thermodynamic chart reports; raw BLOB remains in `radar_debug`. |
+| `sleep_report_enable` | `0x0156` | unset | Optional; enables sleep reports when configured. |
+| `posture_report_enable` | `0x0157` | unset | Optional; enables target-posture reports when configured. |
+| `fall_detection` | `0x0121` | unset | Optional fall-detection enable. |
+| `fall_detection_sensitivity` | `0x0123` | unset | `low`, `medium`, or `high`. |
+
+Optional entities decoded from simple firmware-confirmed report wrappers:
+
+| Entity key | Radar SubID | Type |
+|------------|-------------|------|
+| `realtime_people_number` | `0x0164` | `UINT32` sensor |
+| `ontime_people_number` | `0x0165` | `UINT32` sensor |
+| `realtime_people_counting` | `0x0166` | `UINT32` sensor |
+| `walking_distance` | `0x0174` | `UINT32` sensor |
+| `sleep_presence` | `0x0167` | binary sensor |
+| `sleep_inout_state` | `0x0171` | binary sensor |
+| `sleep_state` | `0x0161` | text sensor |
+| `sleep_event` | `0x0176` | text sensor |
+| `target_posture` | `0x0154` | text sensor |
+| `radar_debug` | `0x0201` and unhandled reports | diagnostic text sensor |
 
 ### Flashing Instructions
 

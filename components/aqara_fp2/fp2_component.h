@@ -11,9 +11,11 @@
 #include "../aqara_fp2_accel/aqara_fp2_accel.h"
 
 #include <ArduinoJson.h>
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <string>
 #include <vector>
 
 namespace esphome {
@@ -97,22 +99,46 @@ enum class OpCode : uint8_t {
 };
 
 enum class AttrId : uint16_t {
+    RADAR_HW_VERSION                = 0x0101,
     RADAR_SW_VERSION                = 0x0102,
+    MOTION_DETECT                   = 0x0103,
+    PRESENCE_DETECT                 = 0x0104,
     WORK_MODE                       = 0x0116,
     MONITOR_MODE                    = 0x0105, // Detection direction (0=default, 1=L/R)
     LEFT_RIGHT_REVERSE              = 0x0122, // L/R swap (0/1/2)
     PRESENCE_DETECT_SENSITIVITY     = 0x0111, // Sensitivity (1-3)
     CLOSING_SETTING                 = 0x0106, // Proximity (0=far, 1=med, 2=close)
     ZONE_CLOSE_AWAY_ENABLE          = 0x0153, // Zone N close/away enable
+    FALL_DETECTION                  = 0x0121, // Fall detection enable
     FALL_SENSITIVITY                = 0x0123, // Fall sensitivity
+    RADAR_INTERFERENCE_AUTO_SETTING = 0x0125,
+    OTA_SET_FLAG                    = 0x0127,
+    FALL_OVERTIME_REPORT_PERIOD     = 0x0134,
+    FALL_OVERTIME_DETECTION         = 0x0135,
+    INTERFERENCE_AUTO_ENABLE        = 0x0139,
+    EDGE_AUTO_SETTING               = 0x0149,
+    EDGE_AUTO_ENABLE                = 0x0150,
+    TARGET_POSTURE                  = 0x0154,
+    PEOPLE_COUNTING                 = 0x0155,
+    SLEEP_REPORT_ENABLE             = 0x0156,
+    POSTURE_REPORT_ENABLE           = 0x0157,
     PEOPLE_COUNT_REPORT_ENABLE      = 0x0158, // People counting enable
+    SLEEP_DATA                      = 0x0159,
+    DELETE_FALSE_TARGET             = 0x0160,
+    SLEEP_STATE                     = 0x0161,
     PEOPLE_NUMBER_ENABLE            = 0x0162, // People number enable
     TARGET_TYPE_ENABLE              = 0x0163, // AI person detection
+    REALTIME_PEOPLE_NUMBER          = 0x0164,
+    REALTIME_PEOPLE_COUNTING        = 0x0166,
+    SLEEP_PRESENCE                  = 0x0167,
     SLEEP_MOUNT_POSITION            = 0x0168, // Sleep mount position
     SLEEP_ZONE_SIZE                 = 0x0169, // Sleep zone dimensions
     WALL_CORNER_POS                 = 0x0170, // Wall/corner position
+    SLEEP_INOUT_STATE               = 0x0171,
     DWELL_TIME_ENABLE               = 0x0172, // Dwell tracking
     WALK_DISTANCE_ENABLE            = 0x0173, // Walking distance
+    WALK_DISTANCE_ALL               = 0x0174,
+    SLEEP_EVENT                     = 0x0176,
     INTERFERENCE_MAP                = 0x0110, // Interference map (40B)
     ENTRY_EXIT_MAP                  = 0x0109, // Enter/exit zones (40B)
     EDGE_MAP                        = 0x0107, // Detection boundary (40B)
@@ -129,9 +155,11 @@ enum class AttrId : uint16_t {
     THERMO_DATA                     = 0x0141,
     TEMPERATURE                     = 0x0128,
     DETECT_ZONE_MOTION              = 0x0115,
-    MOTION_DETECT                   = 0x0103,
-    PRESENCE_DETECT                 = 0x0104,
     ONTIME_PEOPLE_NUMBER            = 0x0165,
+    DEBUG_LOG                       = 0x0201,
+    RADAR_FLASH_ID                  = 0x0302,
+    RADAR_ID                        = 0x0303,
+    RADAR_CALIBRATION_RESULT        = 0x0305,
     INVALID                         = 0xFFFF,
 };
 
@@ -163,9 +191,30 @@ public:
   void set_mounting_position(uint8_t pos) { mounting_position_ = pos; }
   void set_left_right_reverse(bool val) { left_right_reverse_ = val; }
 
+  void set_fall_detection(bool val) {
+    fall_detection_enabled_ = val;
+    has_fall_detection_enabled_ = true;
+  }
+
   void set_fall_detection_sensitivity(uint8_t val) {
     fall_detection_sensitivity_ = val;
+    has_fall_detection_sensitivity_ = true;
   }
+
+  void set_sleep_report_enable(bool val) {
+    sleep_report_enable_ = val;
+    has_sleep_report_enable_ = true;
+  }
+  void set_posture_report_enable(bool val) {
+    posture_report_enable_ = val;
+    has_posture_report_enable_ = true;
+  }
+  void set_people_counting_report_enable(bool val) { people_counting_report_enable_ = val; }
+  void set_people_number_enable(bool val) { people_number_enable_ = val; }
+  void set_target_type_enable(bool val) { target_type_enable_ = val; }
+  void set_dwell_time_enable(bool val) { dwell_time_enable_ = val; }
+  void set_walking_distance_enable(bool val) { walking_distance_enable_ = val; }
+  void set_thermodynamic_chart_enable(bool val) { thermodynamic_chart_enable_ = val; }
 
   void set_interference_grid(const std::vector<uint8_t> &grid);
   void set_exit_grid(const std::vector<uint8_t> &grid);
@@ -232,9 +281,40 @@ public:
   void set_radar_temperature_sensor(sensor::Sensor *sensor) {
       radar_temperature_sensor_ = sensor;
   }
+  void set_realtime_people_number_sensor(sensor::Sensor *sensor) {
+      realtime_people_number_sensor_ = sensor;
+  }
+  void set_ontime_people_number_sensor(sensor::Sensor *sensor) {
+      ontime_people_number_sensor_ = sensor;
+  }
+  void set_realtime_people_counting_sensor(sensor::Sensor *sensor) {
+      realtime_people_counting_sensor_ = sensor;
+  }
+  void set_walking_distance_sensor(sensor::Sensor *sensor) {
+      walking_distance_sensor_ = sensor;
+  }
   void set_radar_software_sensor(text_sensor::TextSensor *sensor) {
       radar_software_sensor_ = sensor;
   }
+  void set_radar_debug_sensor(text_sensor::TextSensor *sensor) {
+      radar_debug_sensor_ = sensor;
+  }
+  void set_sleep_state_sensor(text_sensor::TextSensor *sensor) {
+      sleep_state_sensor_ = sensor;
+  }
+  void set_sleep_event_sensor(text_sensor::TextSensor *sensor) {
+      sleep_event_sensor_ = sensor;
+  }
+  void set_target_posture_sensor(text_sensor::TextSensor *sensor) {
+      target_posture_sensor_ = sensor;
+  }
+  void set_sleep_presence_sensor(binary_sensor::BinarySensor *sensor) {
+      sleep_presence_sensor_ = sensor;
+  }
+  void set_sleep_inout_sensor(binary_sensor::BinarySensor *sensor) {
+      sleep_inout_sensor_ = sensor;
+  }
+  void set_debug_probe_reads(bool enabled) { debug_probe_reads_ = enabled; }
 
   void set_fp2_accel(aqara_fp2_accel::AqaraFP2Accel *accel) {
       fp2_accel_ = accel;
@@ -262,9 +342,23 @@ protected:
   void handle_report_(AttrId attr_id, const std::vector<uint8_t> &payload);
   void handle_location_tracking_report_(const std::vector<uint8_t> &payload);
   void handle_temperature_report_(const std::vector<uint8_t> &payload);
+  void handle_debug_log_report_(const std::vector<uint8_t> &payload);
+  void handle_simple_uint32_report_(const std::vector<uint8_t> &payload,
+                                    sensor::Sensor *sensor, const char *name);
+  void handle_simple_uint8_binary_report_(const std::vector<uint8_t> &payload,
+                                          binary_sensor::BinarySensor *sensor,
+                                          const char *name);
+  void handle_sleep_state_report_(const std::vector<uint8_t> &payload);
+  void handle_sleep_event_report_(const std::vector<uint8_t> &payload);
+  void handle_target_posture_report_(const std::vector<uint8_t> &payload);
   void handle_response_(AttrId attr_id, const std::vector<uint8_t> &payload);
   void handle_reverse_read_request_(AttrId attr_id);
   void send_ack_(AttrId attr_id);
+  const char* attr_id_to_string_(AttrId attr_id);
+  const char* op_code_to_string_(uint8_t type);
+  std::string format_payload_hex_(const std::vector<uint8_t> &payload, size_t max_bytes);
+  void publish_radar_debug_(const char *event, AttrId attr_id,
+                            const std::vector<uint8_t> &payload);
 
   // Initialization
   void perform_reset_();
@@ -279,7 +373,20 @@ protected:
   // Configuration State
   uint8_t mounting_position_{0x01}; // Default Wall
   bool left_right_reverse_{false};
+  bool fall_detection_enabled_{false};
+  bool has_fall_detection_enabled_{false};
   uint8_t fall_detection_sensitivity_{1};
+  bool has_fall_detection_sensitivity_{false};
+  bool sleep_report_enable_{false};
+  bool has_sleep_report_enable_{false};
+  bool posture_report_enable_{false};
+  bool has_posture_report_enable_{false};
+  bool people_counting_report_enable_{true};
+  bool people_number_enable_{true};
+  bool target_type_enable_{true};
+  bool dwell_time_enable_{false};
+  bool walking_distance_enable_{false};
+  bool thermodynamic_chart_enable_{true};
 
   // Grids (Optional)
   GridMap interference_grid_{};
@@ -307,7 +414,18 @@ protected:
   text_sensor::TextSensor *mounting_position_sensor_{nullptr};
 
   sensor::Sensor *radar_temperature_sensor_{nullptr};
+  sensor::Sensor *realtime_people_number_sensor_{nullptr};
+  sensor::Sensor *ontime_people_number_sensor_{nullptr};
+  sensor::Sensor *realtime_people_counting_sensor_{nullptr};
+  sensor::Sensor *walking_distance_sensor_{nullptr};
   text_sensor::TextSensor *radar_software_sensor_{nullptr};
+  text_sensor::TextSensor *radar_debug_sensor_{nullptr};
+  text_sensor::TextSensor *sleep_state_sensor_{nullptr};
+  text_sensor::TextSensor *sleep_event_sensor_{nullptr};
+  text_sensor::TextSensor *target_posture_sensor_{nullptr};
+  binary_sensor::BinarySensor *sleep_presence_sensor_{nullptr};
+  binary_sensor::BinarySensor *sleep_inout_sensor_{nullptr};
+  bool debug_probe_reads_{false};
 
   // Map Configuration (compile-time generated)
   std::string map_config_json_;
