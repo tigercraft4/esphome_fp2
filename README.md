@@ -122,7 +122,7 @@ This is the primary and recommended installation method.
    - Go to "Frontend"
    - Click the three dots (⋮) in the top right
    - Select "Custom repositories"
-   - Add repository URL: `https://github.com/hansihe/esphome_fp2`
+   - Add repository URL: `https://github.com/Ripthulhu/esphome_fp2`
    - Category: `Dashboard`
 
 2. **Install the Card**:
@@ -140,6 +140,15 @@ This is the primary and recommended installation method.
    show_sensor_position: true
    show_zone_labels: true
    ```
+
+### Manual Card Installation
+
+Copy [card.js](card.js) to `/config/www/community/aqara-fp2-card/card.js` and add this Lovelace resource:
+
+```yaml
+url: /local/community/aqara-fp2-card/card.js
+type: module
+```
 
 ### Card Features
 
