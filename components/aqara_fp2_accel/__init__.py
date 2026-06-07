@@ -12,7 +12,7 @@ AqaraFP2Accel = aqara_fp2_accel_ns.class_(
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(AqaraFP2Accel),
-        cv.Optional(CONF_UPDATE_INTERVAL, default="100ms"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_UPDATE_INTERVAL, default="1000ms"): cv.positive_time_period_milliseconds,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 

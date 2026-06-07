@@ -6,7 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
-#include <driver/i2c.h>
+#include <driver/i2c_master.h>
 
 namespace esphome {
 namespace aqara_fp2_accel {
@@ -90,6 +90,8 @@ class AqaraFP2Accel : public Component {
   // I2C low level functions (using ESP-IDF driver directly)
   bool i2c_read_accel_xyz(int16_t *x, int16_t *y, int16_t *z);
   bool i2c_write_reg(uint8_t reg, uint8_t value);
+  bool i2c_probe_accel();
+  void i2c_recover_bus(const char *reason);
   void i2c_init_acc();
 
   // Data processing
@@ -127,10 +129,15 @@ class AqaraFP2Accel : public Component {
 
   // ESP-IDF I2C configuration
   i2c_port_t i2c_port_{I2C_NUM_0};
+  i2c_master_bus_handle_t bus_handle_{nullptr};
+  i2c_master_dev_handle_t dev_handle_{nullptr};
   uint8_t sda_pin_{33};
   uint8_t scl_pin_{32};
-  uint32_t frequency_{400000};  // 400kHz
+  uint32_t frequency_{100000};  // 100kHz is much less prone to bus-stuck states on the FP2 board.
   bool i2c_initialized_{false};
+  uint32_t consecutive_i2c_failures_{0};
+  uint32_t successful_sample_sets_{0};
+  bool log_next_sample_set_{true};
 
   // Static task function
   static void accel_task_(void *param);
