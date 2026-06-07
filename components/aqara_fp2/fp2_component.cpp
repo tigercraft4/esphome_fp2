@@ -155,22 +155,27 @@ void FP2Component::setup() {
 
   // Reset internal state
   waiting_for_ack_attr_id_ = AttrId::INVALID;
-  init_done_ = false;
 
   // GPIO Reset
   perform_reset_();
 }
 
 void FP2Component::perform_reset_() {
+  command_queue_.clear();
+  waiting_for_ack_attr_id_ = AttrId::INVALID;
+  init_done_ = false;
+  last_radar_frame_millis_ = 0;
+  last_heartbeat_millis_ = 0;
+
   if (reset_pin_ != nullptr) {
     ESP_LOGI(TAG, "Performing Hardware Reset via Pin...");
     reset_pin_->setup();
     reset_pin_->digital_write(false);
     delay(100);
     reset_pin_->digital_write(true);
-    ESP_LOGI(TAG, "Hardware Reset Done. Waiting for heartbeat...");
+    ESP_LOGI(TAG, "Hardware Reset Done. Waiting for radar traffic...");
   } else {
-    ESP_LOGI(TAG, "No Reset Pin configured. Waiting for heartbeat...");
+    ESP_LOGI(TAG, "No Reset Pin configured. Waiting for radar traffic...");
   }
 
   if (this->location_report_switch_ != nullptr) {
@@ -182,11 +187,54 @@ void FP2Component::perform_reset_() {
 
 void FP2Component::set_location_reporting_enabled(bool enabled) {
   this->location_reporting_active_ = enabled;
-  this->enqueue_command_(OpCode::WRITE, AttrId::LOCATION_REPORT_ENABLE, (uint8_t)(enabled ? 1 : 0));
+  this->enqueue_command_(OpCode::WRITE, AttrId::LOCATION_REPORT_ENABLE, enabled);
   if (!enabled && this->target_tracking_sensor_ != nullptr) {
     // Clear the sensor state when location reporting is disabled
     this->target_tracking_sensor_->set_has_state(false);
   }
+}
+
+void FP2Component::force_detection_config() {
+  ESP_LOGI(TAG, "Forcing radar detector/report configuration");
+  this->location_reporting_active_ = true;
+  if (this->location_report_switch_ != nullptr) {
+    this->location_report_switch_->publish_state(true);
+  }
+
+  enqueue_command_(OpCode::WRITE, AttrId::MOTION_DETECT, (uint8_t) 1);
+  enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT, (uint8_t) 1);
+  enqueue_command_(OpCode::WRITE, AttrId::MONITOR_MODE, (uint8_t) 0);
+  enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, global_presence_sensitivity_);
+  enqueue_command_(OpCode::WRITE, AttrId::LOCATION_REPORT_ENABLE, true);
+  enqueue_command_(OpCode::WRITE, AttrId::PEOPLE_COUNT_REPORT_ENABLE, people_counting_report_enable_);
+  enqueue_command_(OpCode::WRITE, AttrId::PEOPLE_NUMBER_ENABLE, people_number_enable_);
+  enqueue_command_(OpCode::WRITE, AttrId::TARGET_TYPE_ENABLE, target_type_enable_);
+
+  if (has_sleep_report_enable_) {
+    enqueue_command_(OpCode::WRITE, AttrId::SLEEP_REPORT_ENABLE, sleep_report_enable_);
+  }
+  if (has_posture_report_enable_) {
+    enqueue_command_(OpCode::WRITE, AttrId::POSTURE_REPORT_ENABLE, posture_report_enable_);
+  }
+}
+
+void FP2Component::read_detection_config() {
+  ESP_LOGI(TAG, "Queueing radar detector/report config reads");
+  enqueue_read_(AttrId::MOTION_DETECT);
+  enqueue_read_(AttrId::PRESENCE_DETECT);
+  enqueue_read_(AttrId::MONITOR_MODE);
+  enqueue_read_(AttrId::PRESENCE_DETECT_SENSITIVITY);
+  enqueue_read_(AttrId::LOCATION_REPORT_ENABLE);
+  enqueue_read_(AttrId::PEOPLE_COUNT_REPORT_ENABLE);
+  enqueue_read_(AttrId::PEOPLE_NUMBER_ENABLE);
+  enqueue_read_(AttrId::TARGET_TYPE_ENABLE);
+  enqueue_read_(AttrId::SLEEP_REPORT_ENABLE);
+  enqueue_read_(AttrId::POSTURE_REPORT_ENABLE);
+}
+
+void FP2Component::reset_radar() {
+  ESP_LOGI(TAG, "Resetting radar module via diagnostic action");
+  perform_reset_();
 }
 
 void FP2LocationSwitch::write_state(bool state) {
@@ -211,13 +259,19 @@ void FP2Component::check_initialization_() {
   if (init_done_)
     return;
 
-  // We rely on handle_parsed_frame_ to set a flag or we check
-  // last_heartbeat_millis_
-  if (last_heartbeat_millis_ > 0) {
-    ESP_LOGI(TAG, "Heartbeat received. Starting initialization sequence...");
+  if (last_radar_frame_millis_ > 0) {
+    ESP_LOGI(TAG, "Radar traffic received. Starting initialization sequence...");
     init_done_ = true;
 
     // 1. Basic Settings
+    enqueue_command_(OpCode::WRITE, AttrId::MOTION_DETECT, (uint8_t) 1);
+    enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT, (uint8_t) 1);
+    if (location_reporting_active_) {
+      enqueue_command_(OpCode::WRITE, AttrId::LOCATION_REPORT_ENABLE, true);
+      if (location_report_switch_ != nullptr) {
+        location_report_switch_->publish_state(true);
+      }
+    }
     enqueue_command_(OpCode::WRITE, AttrId::MONITOR_MODE, (uint8_t) 0);
     enqueue_command_(OpCode::WRITE, AttrId::LEFT_RIGHT_REVERSE,
                      (uint8_t)(left_right_reverse_ ? 2 : 0));
@@ -295,6 +349,9 @@ void FP2Component::check_initialization_() {
 
     if (debug_probe_reads_) {
       ESP_LOGI(TAG, "Queueing radar debug probe reads");
+      enqueue_read_(AttrId::MOTION_DETECT);
+      enqueue_read_(AttrId::PRESENCE_DETECT);
+      enqueue_read_(AttrId::LOCATION_REPORT_ENABLE);
       enqueue_read_(AttrId::RADAR_HW_VERSION);
       enqueue_read_(AttrId::RADAR_FLASH_ID);
       enqueue_read_(AttrId::RADAR_ID);
@@ -387,11 +444,7 @@ void FP2Component::process_command_queue_() {
   }
 }
 
-void FP2Component::send_next_command_() {
-  if (command_queue_.empty())
-    return;
-
-  auto &cmd = command_queue_.front();
+void FP2Component::write_command_frame_(const FP2Command &cmd, bool track_timeout) {
   static uint8_t next_tx_seq = 0;
 
   // Build frame: [Sync][Ver][Ver][Seq][Op][Len][Len][Check][Payload][CRC][CRC]
@@ -421,7 +474,21 @@ void FP2Component::send_next_command_() {
   frame.push_back((crc >> 8) & 0xFF);
 
   write_array(frame);
-  last_command_sent_millis_ = millis();
+  if (track_timeout) {
+    last_command_sent_millis_ = millis();
+  }
+  ESP_LOGD(TAG, "Sending %s %s (0x%04X), len=%u data=%s",
+           op_code_to_string_((uint8_t) cmd.type), attr_id_to_string_(cmd.attr_id),
+           (uint16_t) cmd.attr_id, static_cast<unsigned>(cmd.data.size()),
+           format_payload_hex_(cmd.data, 64).c_str());
+}
+
+void FP2Component::send_next_command_() {
+  if (command_queue_.empty())
+    return;
+
+  auto &cmd = command_queue_.front();
+  write_command_frame_(cmd, cmd.type == OpCode::WRITE);
 
   // Only WRITE commands expect an ACK from the radar
   // ACK and Reverse Read Response packets don't get ACKed
@@ -444,8 +511,8 @@ void FP2Component::send_ack_(AttrId attr_id) {
   cmd.data.push_back(((uint16_t) attr_id) & 0xFF);
   cmd.data.push_back(0x03);  // DataType: VOID
 
-  // ACKs are high priority - push to front of queue
-  command_queue_.push_front(cmd);
+  // Report ACKs must not disturb the write/ACK retry queue.
+  write_command_frame_(cmd, false);
 }
 
 void FP2Component::send_reverse_response_(AttrId attr_id, uint8_t byte_val) {
@@ -460,7 +527,8 @@ void FP2Component::send_reverse_response_(AttrId attr_id, uint8_t byte_val) {
   cmd.data.push_back(0x00);  // DataType: UINT8
   cmd.data.push_back(byte_val);
 
-  command_queue_.push_back(cmd);
+  // The radar is synchronously waiting for this reverse-read response.
+  write_command_frame_(cmd, false);
 }
 
 void FP2Component::handle_incoming_byte_(uint8_t byte) {
@@ -570,6 +638,7 @@ void FP2Component::handle_incoming_byte_(uint8_t byte) {
 void FP2Component::handle_parsed_frame_(uint8_t type, AttrId attr_id,
                                         const std::vector<uint8_t> &payload) {
   OpCode op = (OpCode)type;
+  last_radar_frame_millis_ = millis();
   ESP_LOGV(TAG, "Received %s %s (0x%04X), len=%u",
            op_code_to_string_(type), attr_id_to_string_(attr_id),
            (uint16_t) attr_id, static_cast<unsigned>(payload.size()));
@@ -650,7 +719,7 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
         if (payload.size() == 4 && payload[2]  == 0x00) {
             uint8_t state = payload[3];
             if (global_motion_sensor_ != nullptr) {
-              global_motion_sensor_->publish_state(state == 0);
+              global_motion_sensor_->publish_state(state != 0);
             }
             ESP_LOGI(TAG, "Received global motion report: %u", state);
             break;

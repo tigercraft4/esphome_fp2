@@ -324,6 +324,9 @@ public:
   }
 
   void set_location_reporting_enabled(bool enabled);
+  void force_detection_config();
+  void read_detection_config();
+  void reset_radar();
 
   // Grid format conversion
   std::string grid_to_hex_card_format(const GridMap &grid);
@@ -337,6 +340,7 @@ protected:
   // Internal logic
   void process_command_queue_();
   void send_next_command_();
+  void write_command_frame_(const FP2Command &cmd, bool track_timeout);
   void handle_incoming_byte_(uint8_t byte);
   const char* get_mounting_position_string_();
   void handle_parsed_frame_(uint8_t type, AttrId attr_id,
@@ -372,6 +376,7 @@ protected:
 
   GPIOPin *reset_pin_{nullptr};
   bool init_done_{false};
+  uint32_t last_radar_frame_millis_{0};
   uint32_t last_heartbeat_millis_{0};
 
   // Configuration State
