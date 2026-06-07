@@ -67,6 +67,7 @@ CONF_RADAR_TEMPERATURE = "radar_temperature"
 CONF_REALTIME_PEOPLE_NUMBER = "realtime_people_number"
 CONF_ONTIME_PEOPLE_NUMBER = "ontime_people_number"
 CONF_REALTIME_PEOPLE_COUNTING = "realtime_people_counting"
+CONF_PEOPLE_COUNTING = "people_counting"
 CONF_WALKING_DISTANCE = "walking_distance"
 CONF_SLEEP_PRESENCE = "sleep_presence"
 CONF_SLEEP_INOUT_STATE = "sleep_inout_state"
@@ -278,6 +279,10 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_TARGET_POSTURE): text_sensor_.text_sensor_schema(
                 icon="mdi:human",
             ),
+            cv.Optional(CONF_PEOPLE_COUNTING): text_sensor_.text_sensor_schema(
+                icon="mdi:counter",
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            ),
         }
     )
     .extend(uart.UART_DEVICE_SCHEMA)
@@ -295,6 +300,7 @@ SENSOR_MAP = {
     CONF_SLEEP_STATE: (text_sensor_.new_text_sensor, "set_sleep_state_sensor"),
     CONF_SLEEP_EVENT: (text_sensor_.new_text_sensor, "set_sleep_event_sensor"),
     CONF_TARGET_POSTURE: (text_sensor_.new_text_sensor, "set_target_posture_sensor"),
+    CONF_PEOPLE_COUNTING: (text_sensor_.new_text_sensor, "set_people_counting_sensor"),
     CONF_SLEEP_PRESENCE: (binary_sensor.new_binary_sensor, "set_sleep_presence_sensor"),
     CONF_SLEEP_INOUT_STATE: (binary_sensor.new_binary_sensor, "set_sleep_inout_sensor"),
     CONF_LOCATION_REPORT_SWITCH: (switch.new_switch, "set_location_report_switch"),

@@ -9,6 +9,9 @@
  * - show_sensor_position: (optional) Show sensor position marker - Default: true
  * - show_zone_labels: (optional) Show zone labels - Default: true
  * - mounting_position: (optional) Sensor mounting position - Default: from entity or "wall"
+ * - report_switch_entity: (optional) Override the live-view switch entity
+ * - map_config_service: (optional) Override the ESPHome map-config service name
+ * - targets_entity: (optional) Override the target-tracking text sensor entity
  */
 class AqaraFP2Card extends HTMLElement {
   constructor() {
@@ -44,10 +47,11 @@ class AqaraFP2Card extends HTMLElement {
   }
 
   getReportTargetsSwitchEntity() {
-    // Convert entity_prefix (e.g., "sensor.fp2_living_room") to switch entity
-    // Result: "switch.fp2_living_room_report_targets"
-    const prefix = this.config.entity_prefix;
-    const deviceName = prefix.replace(/^[^.]+\./, ''); // Remove domain prefix (sensor., etc.)
+    if (this.config.report_switch_entity) {
+      return this.config.report_switch_entity;
+    }
+
+    const deviceName = this.config.entity_prefix.replace(/^[^.]+\./, "");
     return `switch.${deviceName}_report_targets`;
   }
 
@@ -69,8 +73,8 @@ class AqaraFP2Card extends HTMLElement {
   }
 
   async fetchMapConfig() {
-    const deviceName = this.config.entity_prefix.replace(/^[^.]+\./, '');
-    const service = `${deviceName}_get_map_config`;
+    const deviceName = this.config.entity_prefix.replace(/^[^.]+\./, "");
+    const service = this.config.map_config_service || `${deviceName}_get_map_config`;
 
     try {
       console.log(`[FP2 Card] Fetching map config via service: esphome.${service}`);
@@ -343,7 +347,8 @@ class AqaraFP2Card extends HTMLElement {
     // Binary format: [count(1)][target(14) * count]
     // Will be null/undefined when location reporting is disabled
     console.log(`[FP2 Card] Loading target data...`);
-    const targetsBase64 = getEntityState(`${prefix}_targets`);
+    const targetsEntity = this.config.targets_entity || `${prefix}_targets`;
+    const targetsBase64 = getEntityState(targetsEntity);
     const targetData = targetsBase64 ? decodeTargetsBase64(targetsBase64) : [];
     const targetCount = targetData.length;
     console.log(`[FP2 Card] Total targets: ${targetCount}`);

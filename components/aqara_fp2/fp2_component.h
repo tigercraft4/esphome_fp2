@@ -308,6 +308,9 @@ public:
   void set_target_posture_sensor(text_sensor::TextSensor *sensor) {
       target_posture_sensor_ = sensor;
   }
+  void set_people_counting_sensor(text_sensor::TextSensor *sensor) {
+      people_counting_sensor_ = sensor;
+  }
   void set_sleep_presence_sensor(binary_sensor::BinarySensor *sensor) {
       sleep_presence_sensor_ = sensor;
   }
@@ -351,6 +354,7 @@ protected:
   void handle_sleep_state_report_(const std::vector<uint8_t> &payload);
   void handle_sleep_event_report_(const std::vector<uint8_t> &payload);
   void handle_target_posture_report_(const std::vector<uint8_t> &payload);
+  void handle_people_counting_report_(const std::vector<uint8_t> &payload);
   void handle_response_(AttrId attr_id, const std::vector<uint8_t> &payload);
   void handle_reverse_read_request_(AttrId attr_id);
   void send_ack_(AttrId attr_id);
@@ -423,6 +427,7 @@ protected:
   text_sensor::TextSensor *sleep_state_sensor_{nullptr};
   text_sensor::TextSensor *sleep_event_sensor_{nullptr};
   text_sensor::TextSensor *target_posture_sensor_{nullptr};
+  text_sensor::TextSensor *people_counting_sensor_{nullptr};
   binary_sensor::BinarySensor *sleep_presence_sensor_{nullptr};
   binary_sensor::BinarySensor *sleep_inout_sensor_{nullptr};
   bool debug_probe_reads_{false};

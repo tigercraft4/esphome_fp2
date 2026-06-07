@@ -88,6 +88,7 @@ Optional entities decoded from simple firmware-confirmed report wrappers:
 | `realtime_people_number` | `0x0164` | `UINT32` sensor |
 | `ontime_people_number` | `0x0165` | `UINT32` sensor |
 | `realtime_people_counting` | `0x0166` | `UINT32` sensor |
+| `people_counting` | `0x0155` | text sensor (`id=<n> ontime=<n> realtime=<n>`) |
 | `walking_distance` | `0x0174` | `UINT32` sensor |
 | `sleep_presence` | `0x0167` | binary sensor |
 | `sleep_inout_state` | `0x0171` | binary sensor |
@@ -156,6 +157,9 @@ This is the primary and recommended installation method.
 | `show_sensor_position` | boolean | `true` | Show sensor position marker |
 | `show_zone_labels` | boolean | `true` | Show zone names |
 | `mounting_position` | string | from entity | Override mounting position |
+| `report_switch_entity` | string | derived from `entity_prefix` | Override the live-view switch entity |
+| `map_config_service` | string | derived from `entity_prefix` | Override the ESPHome map-config service name |
+| `targets_entity` | string | derived from `entity_prefix` | Override the target-tracking text sensor entity |
 
 ---
 

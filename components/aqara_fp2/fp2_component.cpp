@@ -716,8 +716,11 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
       handle_target_posture_report_(payload);
       break;
 
-    case AttrId::THERMO_DATA:
     case AttrId::PEOPLE_COUNTING:
+      handle_people_counting_report_(payload);
+      break;
+
+    case AttrId::THERMO_DATA:
     case AttrId::SLEEP_DATA:
       publish_radar_debug_("radar_report", attr_id, payload);
       break;
@@ -892,6 +895,34 @@ void FP2Component::handle_target_posture_report_(const std::vector<uint8_t> &pay
   ESP_LOGI(TAG, "target_posture report: %s", state.c_str());
   if (target_posture_sensor_ != nullptr) {
     target_posture_sensor_->publish_state(state);
+  }
+}
+
+void FP2Component::handle_people_counting_report_(const std::vector<uint8_t> &payload) {
+  if (payload.size() < 5 || payload[2] != 0x06) {
+    publish_radar_debug_("people_counting_malformed", AttrId::PEOPLE_COUNTING, payload);
+    return;
+  }
+
+  uint16_t declared_len = (payload[3] << 8) | payload[4];
+  if (declared_len < 7 || payload.size() < 5 + declared_len) {
+    publish_radar_debug_("people_counting_bad_len", AttrId::PEOPLE_COUNTING, payload);
+    return;
+  }
+
+  uint8_t target_or_zone = payload[5];
+  uint32_t ontime = ((uint32_t) payload[6] << 24) |
+                    ((uint32_t) payload[7] << 16) |
+                    ((uint32_t) payload[8] << 8) |
+                    (uint32_t) payload[9];
+  uint16_t realtime = ((uint16_t) payload[10] << 8) | (uint16_t) payload[11];
+
+  std::string state = "id=" + std::to_string(target_or_zone) +
+                      " ontime=" + std::to_string(ontime) +
+                      " realtime=" + std::to_string(realtime);
+  ESP_LOGI(TAG, "people_counting report: %s", state.c_str());
+  if (people_counting_sensor_ != nullptr) {
+    people_counting_sensor_->publish_state(state);
   }
 }
 

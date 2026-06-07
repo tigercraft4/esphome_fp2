@@ -164,6 +164,8 @@ aqara_fp2:
     name: "Ontime People Number"
   realtime_people_counting:
     name: "Realtime People Counting"
+  people_counting:
+    name: "People Counting"
   walking_distance:
     name: "Walking Distance"
   sleep_presence:
