@@ -102,7 +102,19 @@ Optional entities decoded from simple firmware-confirmed report wrappers:
 | `sleep_state` | `0x0161` | text sensor |
 | `sleep_event` | `0x0176` | text sensor |
 | `target_posture` | `0x0154` | text sensor |
-| `radar_debug` | `0x0201` and unhandled reports | diagnostic text sensor |
+| `radar_debug` | `0x0201`, unhandled reports, and command telemetry | diagnostic text sensor |
+
+Diagnostic actions exposed in the example config:
+
+| Action | Purpose |
+|--------|---------|
+| `fp2_force_detection_config` | Replays the known-good presence/live-map setup (`work_mode=3`, reporting enabled, AI target filter from config). |
+| `fp2_configure_sleep_mode` | Replays the confirmed app-like sleep setup. Parameters are `width`, `length`, and `mount_position`; the stock capture value `120 x 180`, mount `1`, writes `sleep_zone_size=0x007800B4`. |
+| `fp2_write_attr_uint8` / `fp2_write_attr_uint16` / `fp2_write_attr_uint32` / `fp2_write_attr_bool` | Raw attribute write probes for reverse engineering. |
+| `fp2_set_work_mode` | Writes raw `work_mode`; confirmed `3=presence`, `9=sleep` on the live sensor. |
+| `fp2_calibrate_empty_room` | Sends the current empty-room calibration candidate `reset_absent_status` (`0x0113=TRUE`). |
+
+`radar_debug` now also publishes command TX/ACK/retry/timeout events so Home Assistant can show whether a probe write reached the radar. For complete ordering, use native ESPHome logs; HA history can coalesce rapid text-sensor updates.
 
 ### Flashing Instructions
 

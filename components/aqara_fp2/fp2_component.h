@@ -338,7 +338,9 @@ public:
   void read_attr(uint16_t attr_id);
   void write_attr_uint8(uint16_t attr_id, uint8_t value);
   void write_attr_uint16(uint16_t attr_id, uint16_t value);
+  void write_attr_uint32(uint16_t attr_id, uint32_t value);
   void write_attr_bool(uint16_t attr_id, bool value);
+  void configure_sleep_mode(uint16_t width, uint16_t length, uint8_t mount_position);
   void set_work_mode(uint8_t mode);
   void set_ai_target_filter_enabled(bool enabled);
   void calibrate_empty_room();
@@ -499,6 +501,7 @@ protected:
 
   void enqueue_command_(OpCode type, AttrId attr_id, uint8_t byte_val);
   void enqueue_command_(OpCode type, AttrId attr_id, uint16_t word_val);
+  void enqueue_command_(OpCode type, AttrId attr_id, uint32_t dword_val);
   void enqueue_command_(OpCode type, AttrId attr_id, bool bool_val);
   void enqueue_command_blob2_(AttrId attr_id,
                               const std::vector<uint8_t> &blob_content);

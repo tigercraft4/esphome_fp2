@@ -66,6 +66,13 @@ api:
       then:
         - lambda: |-
             id(fp2).write_attr_uint16((uint16_t) attr, (uint16_t) value);
+    - action: fp2_write_attr_uint32
+      variables:
+        attr: int
+        value: int
+      then:
+        - lambda: |-
+            id(fp2).write_attr_uint32((uint16_t) attr, (uint32_t) value);
     - action: fp2_write_attr_bool
       variables:
         attr: int
@@ -73,6 +80,14 @@ api:
       then:
         - lambda: |-
             id(fp2).write_attr_bool((uint16_t) attr, value);
+    - action: fp2_configure_sleep_mode
+      variables:
+        width: int
+        length: int
+        mount_position: int
+      then:
+        - lambda: |-
+            id(fp2).configure_sleep_mode((uint16_t) width, (uint16_t) length, (uint8_t) mount_position);
     - action: fp2_set_work_mode
       variables:
         mode: int

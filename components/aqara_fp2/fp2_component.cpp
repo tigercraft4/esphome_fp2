@@ -288,11 +288,39 @@ void FP2Component::write_attr_uint16(uint16_t attr_id, uint16_t value) {
   enqueue_command_(OpCode::WRITE, attr, value);
 }
 
+void FP2Component::write_attr_uint32(uint16_t attr_id, uint32_t value) {
+  AttrId attr = (AttrId) attr_id;
+  ESP_LOGI(TAG, "Queueing raw UINT32 radar write for %s (0x%04X) = %u",
+           attr_id_to_string_(attr), attr_id, value);
+  enqueue_command_(OpCode::WRITE, attr, value);
+}
+
 void FP2Component::write_attr_bool(uint16_t attr_id, bool value) {
   AttrId attr = (AttrId) attr_id;
   ESP_LOGI(TAG, "Queueing raw BOOL radar write for %s (0x%04X) = %u",
            attr_id_to_string_(attr), attr_id, value ? 1 : 0);
   enqueue_command_(OpCode::WRITE, attr, value);
+}
+
+void FP2Component::configure_sleep_mode(uint16_t width, uint16_t length, uint8_t mount_position) {
+  uint32_t zone_size = ((uint32_t) width << 16) | (uint32_t) length;
+  std::vector<uint8_t> empty_zone(41, 0x00);
+
+  ESP_LOGI(TAG, "Queueing sleep mode setup width=%u length=%u mount=%u zone_size=0x%08X",
+           width, length, mount_position, zone_size);
+
+  location_reporting_active_ = true;
+  if (location_report_switch_ != nullptr) {
+    location_report_switch_->publish_state(true);
+  }
+
+  enqueue_command_(OpCode::WRITE, AttrId::SLEEP_REPORT_ENABLE, true);
+  enqueue_command_blob2_(AttrId::ZONE_MAP, empty_zone);
+  enqueue_command_(OpCode::WRITE, AttrId::WORK_MODE, (uint8_t) 9);
+  enqueue_command_blob2_(AttrId::ZONE_MAP, empty_zone);
+  enqueue_command_(OpCode::WRITE, AttrId::LOCATION_REPORT_ENABLE, true);
+  enqueue_command_(OpCode::WRITE, AttrId::SLEEP_ZONE_SIZE, zone_size);
+  enqueue_command_(OpCode::WRITE, AttrId::SLEEP_MOUNT_POSITION, mount_position);
 }
 
 void FP2Component::set_work_mode(uint8_t mode) {
@@ -501,11 +529,13 @@ void FP2Component::process_command_queue_() {
         if (cmd.retry_count >= MAX_RETRIES) {
           ESP_LOGW(TAG, "Command 0x%04X timed out after %d retries. Dropping.",
                    (uint16_t) cmd.attr_id, MAX_RETRIES);
+          publish_radar_debug_("command_ack_failed", cmd.attr_id, cmd.data);
           command_queue_.pop_front();
           waiting_for_ack_attr_id_ = AttrId::INVALID;
         } else {
           ESP_LOGW(TAG, "Command 0x%04X timed out. Retrying (%d/%d)...",
                    (uint16_t) cmd.attr_id, cmd.retry_count, MAX_RETRIES);
+          publish_radar_debug_("command_retry", cmd.attr_id, cmd.data);
           // Resend handled by send_next_command_ logic once waiting state calls
           // reset? Actually, we should just resend immediately
           send_next_command_();
@@ -524,6 +554,7 @@ void FP2Component::process_command_queue_() {
         auto &cmd = command_queue_.front();
         ESP_LOGD(TAG, "Read %s (0x%04X) timed out. Dropping.",
                  attr_id_to_string_(cmd.attr_id), (uint16_t) cmd.attr_id);
+        publish_radar_debug_("command_read_timeout", cmd.attr_id, cmd.data);
         command_queue_.pop_front();
       }
       waiting_for_response_attr_id_ = AttrId::INVALID;
@@ -569,6 +600,8 @@ void FP2Component::write_command_frame_(const FP2Command &cmd, bool track_timeou
   write_array(frame);
   if (track_timeout) {
     last_command_sent_millis_ = millis();
+    publish_radar_debug_(cmd.type == OpCode::READ ? "command_tx_read" : "command_tx_write",
+                         cmd.attr_id, cmd.data);
   }
   ESP_LOGD(TAG, "Sending %s %s (0x%04X), len=%u data=%s",
            op_code_to_string_((uint8_t) cmd.type), attr_id_to_string_(cmd.attr_id),
@@ -767,6 +800,7 @@ void FP2Component::handle_parsed_frame_(uint8_t type, AttrId attr_id,
 void FP2Component::handle_ack_(AttrId attr_id) {
   if (waiting_for_ack_attr_id_ == attr_id) {
     ESP_LOGD(TAG, "ACK Received for 0x%04X", (uint16_t) attr_id);
+    publish_radar_debug_("command_ack", attr_id, std::vector<uint8_t>{});
     waiting_for_ack_attr_id_ = AttrId::INVALID;
     if (!command_queue_.empty()) {
       command_queue_.pop_front();
@@ -801,6 +835,7 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
     case AttrId::WORK_MODE:
         if (payload.size() == 4 && payload[2] == 0x00) {
             ESP_LOGI(TAG, "Received work mode report: %u", payload[3]);
+            publish_radar_debug_("radar_report", attr_id, payload);
             break;
         }
 
@@ -1236,6 +1271,25 @@ void FP2Component::enqueue_command_(OpCode type, AttrId attr_id,
   cmd.data.push_back(0x01); // UINT16
   cmd.data.push_back((word_val >> 8) & 0xFF);
   cmd.data.push_back(word_val & 0xFF);
+
+  command_queue_.push_back(cmd);
+}
+
+void FP2Component::enqueue_command_(OpCode type, AttrId attr_id,
+                                    uint32_t dword_val) {
+  FP2Command cmd;
+  cmd.type = type;
+  cmd.attr_id = attr_id;
+  cmd.retry_count = 0;
+
+  // Payload: [SubID 2] [Type 1] [Data 4]
+  cmd.data.push_back((((uint16_t) attr_id) >> 8) & 0xFF);
+  cmd.data.push_back(((uint16_t) attr_id) & 0xFF);
+  cmd.data.push_back(0x02); // UINT32
+  cmd.data.push_back((dword_val >> 24) & 0xFF);
+  cmd.data.push_back((dword_val >> 16) & 0xFF);
+  cmd.data.push_back((dword_val >> 8) & 0xFF);
+  cmd.data.push_back(dword_val & 0xFF);
 
   command_queue_.push_back(cmd);
 }
