@@ -28,6 +28,8 @@ This project provides two main components for working with the Aqara FP2 mmWave 
 - Zone occupancy and motion detection
 - Interactive web card with full/zoomed display modes
 - Firmware-derived report toggles and diagnostics for people counting, walking distance, sleep state, target posture, and radar debug logs
+- Shared ESPHome I2C support for the board accelerometer and OPT3001 illuminance sensor
+- RGB status LED control on the stock FP2 LED channels
 
 ---
 
@@ -38,7 +40,7 @@ The ESPHome components allow you to flash custom firmware to the Aqara FP2 and i
 ### Components
 
 - **`aqara_fp2`** - Main component for FP2 radar sensor control and data collection
-- **`aqara_fp2_accel`** - Accelerometer interface for mounting position detection
+- **`aqara_fp2_accel`** - I2C accelerometer interface for mounting position detection
 
 ### Installation
 
@@ -48,7 +50,7 @@ For remote installation (once published):
 external_components:
   - source:
       type: git
-      url: https://github.com/hansihe/esphome_fp2
+      url: https://github.com/Ripthulhu/esphome_fp2
       ref: main
     components: [aqara_fp2, aqara_fp2_accel]
 ```
@@ -56,6 +58,10 @@ external_components:
 ### Configuration Example
 
 See [example_config.yaml](example_config.yaml) for a complete working configuration.
+
+### FP2 Board Hardware
+
+The stock board uses GPIO33/GPIO32 for the internal I2C bus. The accelerometer is at `0x27`; the OPT3001 illuminance sensor is at `0x44`. The status LED is wired as an inverted RGB LED with red on GPIO14, green on GPIO26, and blue on GPIO27.
 
 ### Grid Configuration
 

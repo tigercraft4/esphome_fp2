@@ -47,6 +47,12 @@ uart:
   rx_pin: GPIO18
   baud_rate: 890000
 
+i2c:
+  sda: GPIO33
+  scl: GPIO32
+  scan: true
+  frequency: 100kHz
+
 external_components:
   - source:
       type: local
@@ -171,13 +177,19 @@ aqara_fp2:
   sleep_presence:
     name: "Sleep Presence"
   sleep_inout_state:
-    name: "Sleep In/Out State"
+    name: "Sleep In Out State"
   sleep_state:
     name: "Sleep State"
   sleep_event:
     name: "Sleep Event"
   target_posture:
     name: "Target Posture"
+
+sensor:
+  - platform: opt3001
+    name: "Illuminance"
+    address: 0x44
+    update_interval: 30s
 
 binary_sensor:
   # Button on the bottom of the device
@@ -187,11 +199,23 @@ binary_sensor:
       inverted: true
     name: "Device Button"
 
-# Status LED (README: IO27 - LED). Using one channel of RGB as status.
-# Unused: IO26, IO14
+output:
+  - platform: ledc
+    id: status_led_red
+    pin: GPIO14
+    inverted: true
+  - platform: ledc
+    id: status_led_green
+    pin: GPIO26
+    inverted: true
+  - platform: ledc
+    id: status_led_blue
+    pin: GPIO27
+    inverted: true
+
 light:
-  - platform: status_led
+  - platform: rgb
     name: "Status LED"
-    pin:
-      number: GPIO27
-      inverted: true
+    red: status_led_red
+    green: status_led_green
+    blue: status_led_blue

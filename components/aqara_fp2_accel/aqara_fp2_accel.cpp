@@ -6,146 +6,19 @@
 namespace esphome {
 namespace aqara_fp2_accel {
 
-bool AqaraFP2Accel::i2c_init_bus() {
-  ESP_LOGI(TAG, "Initializing I2C bus on port %d (SDA=%d, SCL=%d, freq=%d Hz)",
-           i2c_port_, sda_pin_, scl_pin_, frequency_);
-
-  if (i2c_initialized_) {
-    return true;
-  }
-
-  i2c_master_bus_config_t bus_conf = {};
-  bus_conf.i2c_port = i2c_port_;
-  bus_conf.sda_io_num = static_cast<gpio_num_t>(sda_pin_);
-  bus_conf.scl_io_num = static_cast<gpio_num_t>(scl_pin_);
-  bus_conf.clk_source = I2C_CLK_SRC_DEFAULT;
-  bus_conf.glitch_ignore_cnt = 7;
-  bus_conf.flags.enable_internal_pullup = true;
-
-  esp_err_t err = i2c_new_master_bus(&bus_conf, &bus_handle_);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "I2C master bus init failed: %s", esp_err_to_name(err));
-    return false;
-  }
-
-  i2c_device_config_t dev_conf = {};
-  dev_conf.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-  dev_conf.device_address = ACC_SENSOR_ADDR;
-  dev_conf.scl_speed_hz = frequency_;
-  dev_conf.scl_wait_us = 20000;
-
-  err = i2c_master_bus_add_device(bus_handle_, &dev_conf, &dev_handle_);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "I2C device add failed: %s", esp_err_to_name(err));
-    i2c_del_master_bus(bus_handle_);
-    bus_handle_ = nullptr;
-    return false;
-  }
-
-  i2c_recover_bus("startup");
-  if (!i2c_probe_accel()) {
-    ESP_LOGW(TAG, "Accelerometer did not ACK during setup; reads will keep retrying");
-  }
-
-  ESP_LOGI(TAG, "I2C bus initialized successfully");
-  i2c_initialized_ = true;
-  return true;
-}
-
 void AqaraFP2Accel::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Aqara FP2 Accelerometer...");
-
-  // Initialize I2C bus
-  if (!i2c_init_bus()) {
-    ESP_LOGE(TAG, "Failed to initialize I2C bus");
-    this->mark_failed();
-    return;
-  }
-
-  // Initialize the accelerometer
   i2c_init_acc();
-
-  // Create mutex for thread-safe access
-  mutex_ = xSemaphoreCreateMutex();
-  if (mutex_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to create mutex");
-    this->mark_failed();
-    return;
-  }
-
-  // Create FreeRTOS task for I2C operations
-  task_running_ = true;
-  BaseType_t result = xTaskCreate(
-    accel_task_,           // Task function
-    "accel_task",          // Task name
-    4096,                  // Stack size
-    this,                  // Parameter (this pointer)
-    1,                     // Priority
-    &task_handle_          // Task handle
-  );
-
-  if (result != pdPASS) {
-    ESP_LOGE(TAG, "Failed to create accelerometer task");
-    this->mark_failed();
-    task_running_ = false;
-  } else {
-    ESP_LOGI(TAG, "Accelerometer task created successfully");
-  }
 }
 
-void AqaraFP2Accel::accel_task_(void *param) {
-  AqaraFP2Accel *accel = static_cast<AqaraFP2Accel *>(param);
-  accel->task_loop_();
-}
-
-void AqaraFP2Accel::task_loop_() {
-  ESP_LOGI(TAG, "Accelerometer task started (interval: %d ms)", update_interval_ms_);
-
-  while (task_running_) {
-    // Read and process accelerometer data
-    read_process_accel();
-
-    // Delay for the configured interval
-    vTaskDelay(pdMS_TO_TICKS(update_interval_ms_));
-  }
-
-  ESP_LOGI(TAG, "Accelerometer task stopped");
-  vTaskDelete(nullptr);
-}
-
-// Thread-safe public accessors
-int AqaraFP2Accel::get_output_angle_z() const {
-  if (mutex_ == nullptr) return 0;
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-  int value = output_angle_z_;
-  xSemaphoreGive(mutex_);
-  return value;
-}
-
-Orientation AqaraFP2Accel::get_orientation() const {
-  if (mutex_ == nullptr) return Orientation::INVALID;
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-  Orientation value = stable_orientation_;
-  xSemaphoreGive(mutex_);
-  return value;
-}
-
-bool AqaraFP2Accel::is_vibrating() const {
-  if (mutex_ == nullptr) return false;
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-  bool value = acc_state_.is_vibrating;
-  xSemaphoreGive(mutex_);
-  return value;
+void AqaraFP2Accel::update() {
+  read_process_accel();
 }
 
 void AqaraFP2Accel::dump_config() {
   ESP_LOGCONFIG(TAG, "Aqara FP2 Accelerometer:");
-  ESP_LOGCONFIG(TAG, "  I2C Port: %d", i2c_port_);
-  ESP_LOGCONFIG(TAG, "  SDA Pin: GPIO%d", sda_pin_);
-  ESP_LOGCONFIG(TAG, "  SCL Pin: GPIO%d", scl_pin_);
-  ESP_LOGCONFIG(TAG, "  Frequency: %d Hz", frequency_);
-  ESP_LOGCONFIG(TAG, "  I2C Address: 0x%02X", ACC_SENSOR_ADDR);
-  ESP_LOGCONFIG(TAG, "  Update Interval: %d ms", update_interval_ms_);
+  LOG_I2C_DEVICE(this);
+  ESP_LOGCONFIG(TAG, "  Update Interval: %u ms", this->get_update_interval());
   ESP_LOGCONFIG(TAG, "  Calibration X: %d", accel_corr_x_);
   ESP_LOGCONFIG(TAG, "  Calibration Y: %d", accel_corr_y_);
   ESP_LOGCONFIG(TAG, "  Calibration Z: %d", accel_corr_z_);
@@ -157,41 +30,23 @@ bool AqaraFP2Accel::i2c_read_accel_xyz(int16_t *x, int16_t *y, int16_t *z) {
   // Y: 0x04, 0x05
   // Z: 0x06, 0x07
   uint8_t data[6];
-  uint8_t reg_addr = 0x02;
 
-  // Use ESP-IDF I2C driver directly for better control
-  if (dev_handle_ == nullptr) {
-    ESP_LOGW(TAG, "I2C device handle not initialized");
-    *x = 0;
-    *y = 0;
-    *z = 0;
-    return false;
-  }
-
-  esp_err_t err = i2c_master_transmit_receive(
-    dev_handle_,
-    &reg_addr,
-    1,
-    data,
-    6,
-    1000  // 1 second timeout
-  );
-
-  if (err != ESP_OK) {
-    consecutive_i2c_failures_++;
+  if (!this->read_bytes(DA_REG_OUT_X_L, data, 6)) {
+    consecutive_read_failures_++;
     log_next_sample_set_ = true;
-    ESP_LOGW(TAG, "Failed to read accelerometer data: %s (failure #%lu)",
-             esp_err_to_name(err), static_cast<unsigned long>(consecutive_i2c_failures_));
-    if (consecutive_i2c_failures_ == 1 || consecutive_i2c_failures_ % 5 == 0) {
-      i2c_recover_bus("read failure");
-    }
+    ESP_LOGW(TAG, "Failed to read accelerometer data (failure #%lu)",
+             static_cast<unsigned long>(consecutive_read_failures_));
     *x = 0;
     *y = 0;
     *z = 0;
     return false;
   }
 
-  consecutive_i2c_failures_ = 0;
+  if (consecutive_read_failures_ > 0) {
+    ESP_LOGI(TAG, "Accelerometer recovered after %lu consecutive read failures",
+             static_cast<unsigned long>(consecutive_read_failures_));
+    consecutive_read_failures_ = 0;
+  }
 
   // Parse X axis (registers 0x02, 0x03)
   uint16_t x_raw = (uint16_t)(data[0] >> 4) | ((uint16_t)data[1] << 4);
@@ -218,68 +73,24 @@ bool AqaraFP2Accel::i2c_read_accel_xyz(int16_t *x, int16_t *y, int16_t *z) {
 }
 
 bool AqaraFP2Accel::i2c_write_reg(uint8_t reg, uint8_t value) {
-  uint8_t write_buf[2] = {reg, value};
-
-  if (dev_handle_ == nullptr) {
-    ESP_LOGW(TAG, "I2C device handle not initialized");
-    return false;
-  }
-
-  esp_err_t err = i2c_master_transmit(
-    dev_handle_,
-    write_buf,
-    2,
-    1000  // 1 second timeout
-  );
-
-  if (err != ESP_OK) {
-    ESP_LOGW(TAG, "Failed to write register 0x%02X: %s", reg, esp_err_to_name(err));
-    i2c_recover_bus("write failure");
+  if (!this->write_byte(reg, value)) {
+    ESP_LOGW(TAG, "Failed to write register 0x%02X", reg);
     return false;
   }
 
   return true;
-}
-
-bool AqaraFP2Accel::i2c_probe_accel() {
-  if (bus_handle_ == nullptr) {
-    ESP_LOGW(TAG, "I2C bus handle not initialized");
-    return false;
-  }
-
-  esp_err_t err = i2c_master_probe(bus_handle_, ACC_SENSOR_ADDR, 100);
-  if (err != ESP_OK) {
-    ESP_LOGW(TAG, "Accelerometer probe at 0x%02X failed: %s", ACC_SENSOR_ADDR, esp_err_to_name(err));
-    return false;
-  }
-
-  ESP_LOGI(TAG, "Accelerometer acknowledged at 0x%02X", ACC_SENSOR_ADDR);
-  return true;
-}
-
-void AqaraFP2Accel::i2c_recover_bus(const char *reason) {
-  if (bus_handle_ == nullptr) {
-    return;
-  }
-
-  esp_err_t err = i2c_master_bus_reset(bus_handle_);
-  if (err != ESP_OK) {
-    ESP_LOGW(TAG, "I2C bus reset after %s failed: %s", reason, esp_err_to_name(err));
-    return;
-  }
-
-  ESP_LOGD(TAG, "I2C bus reset after %s", reason);
 }
 
 void AqaraFP2Accel::i2c_init_acc() {
   ESP_LOGI(TAG, "Initializing accelerometer");
 
-  // Write 0x0E to Reg 0x11, 0x40 to Reg 0x0F
-  if (!i2c_write_reg(0x11, 0x0e)) {
-    ESP_LOGW(TAG, "Failed to write to register 0x11");
+  // DA_REG_CONFIG (0x11): mode/filter config, init value 0x0E
+  if (!i2c_write_reg(DA_REG_CONFIG, 0x0e)) {
+    ESP_LOGW(TAG, "Failed to write CONFIG (0x11)");
   }
 
-  if (!i2c_write_reg(0x0f, 0x40)) {
+  // DA_REG_WHO_AM_I (0x0F): written 0x40 during init (confirmed from firmware; may be config reg)
+  if (!i2c_write_reg(DA_REG_WHO_AM_I, 0x40)) {
     ESP_LOGW(TAG, "Failed to write to register 0x0F");
   }
 }
@@ -337,9 +148,7 @@ void AqaraFP2Accel::acc_data_deal(int32_t acc_raw_x, int32_t acc_raw_y, int32_t 
     int16_t c31 = i_angle_z;
     if (angle_z_int < 1) c31 = -c31; // abs()
 
-    if (mutex_ != nullptr) xSemaphoreTake(mutex_, portMAX_DELAY);
     output_angle_z_ = 90 - c31;
-    if (mutex_ != nullptr) xSemaphoreGive(mutex_);
 
     //ESP_LOGI(TAG, "Angles: %d Ax:%d Ay:%d Az:%d", output_angle_z_, i_angle_x, i_angle_y, i_angle_z);
 
@@ -444,11 +253,9 @@ void AqaraFP2Accel::acc_data_deal(int32_t acc_raw_x, int32_t acc_raw_y, int32_t 
     }
 
     // Commit state
-    if (mutex_ != nullptr) xSemaphoreTake(mutex_, portMAX_DELAY);
     Orientation prev_raw = raw_orientation_;
     stable_orientation_ = stable_orientation;
     raw_orientation_ = curr_orient;
-    if (mutex_ != nullptr) xSemaphoreGive(mutex_);
 
     // Log change (helpful for debugging "broken" state)
     if (curr_orient != prev_raw) {
@@ -457,10 +264,6 @@ void AqaraFP2Accel::acc_data_deal(int32_t acc_raw_x, int32_t acc_raw_y, int32_t 
     }
 
   // Vibration Detection
-  // Thread-safe update of vibration state
-  if (mutex_ != nullptr) {
-    xSemaphoreTake(mutex_, portMAX_DELAY);
-  }
 
   uint32_t delta_sum;
   if (acc_mag_sum < acc_state_.last_acc_sum) {
@@ -494,11 +297,6 @@ void AqaraFP2Accel::acc_data_deal(int32_t acc_raw_x, int32_t acc_raw_y, int32_t 
 
   bool vib_state = acc_state_.is_vibrating;
 
-  if (mutex_ != nullptr) {
-    xSemaphoreGive(mutex_);
-  }
-
-  // Vibration State Change (logging outside mutex to avoid blocking)
   if (prev_vib_state_ != vib_state) {
     ESP_LOGI(TAG, "vibration=%s", vib_state ? "true" : "false");
     prev_vib_state_ = vib_state;

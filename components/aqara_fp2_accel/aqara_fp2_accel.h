@@ -1,12 +1,9 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "esphome/components/i2c/i2c.h"
 #include <cstdint>
 #include <array>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <freertos/semphr.h>
-#include <driver/i2c_master.h>
 
 namespace esphome {
 namespace aqara_fp2_accel {
@@ -15,6 +12,16 @@ static const char *const TAG = "aqara_fp2_accel";
 
 // I2C address for the accelerometer
 static const uint8_t ACC_SENSOR_ADDR = 0x27;
+
+// Register map (addresses confirmed from firmware; names approximate)
+static const uint8_t DA_REG_OUT_X_L  = 0x02;  // X axis low byte (high nibble = bits[3:0])
+static const uint8_t DA_REG_OUT_X_H  = 0x03;  // X axis high byte (bits[11:4])
+static const uint8_t DA_REG_OUT_Y_L  = 0x04;
+static const uint8_t DA_REG_OUT_Y_H  = 0x05;
+static const uint8_t DA_REG_OUT_Z_L  = 0x06;
+static const uint8_t DA_REG_OUT_Z_H  = 0x07;
+static const uint8_t DA_REG_WHO_AM_I = 0x0F;  // Init writes 0x40 (may be config, not read-only ID)
+static const uint8_t DA_REG_CONFIG   = 0x11;  // Mode/config register (init writes 0x0E)
 
 // Number of samples to buffer
 static const uint8_t ACC_SAMPLE_COUNT = 10;
@@ -64,34 +71,26 @@ struct AccelState {
   bool is_vibrating{false};
 };
 
-class AqaraFP2Accel : public Component {
+class AqaraFP2Accel : public PollingComponent, public i2c::I2CDevice {
  public:
   void setup() override;
-  void loop() override {}
+  void update() override;
   void dump_config() override;
 
   float get_setup_priority() const override { return setup_priority::BUS; }
 
-  // Public accessors for outputs (thread-safe)
-  int get_output_angle_z() const;
-  Orientation get_orientation() const;
-  bool is_vibrating() const;
+  // Public accessors
+  int get_output_angle_z() const { return output_angle_z_; }
+  Orientation get_orientation() const { return stable_orientation_; }
+  bool is_vibrating() const { return acc_state_.is_vibrating; }
 
   // Calibration
   bool calculate_calibration();
 
-  // Task configuration
-  void set_update_interval(uint32_t interval_ms) { update_interval_ms_ = interval_ms; }
-
  protected:
-  // I2C initialization
-  bool i2c_init_bus();
-
-  // I2C low level functions (using ESP-IDF driver directly)
+  // I2C low level functions (using ESPHome I2C component)
   bool i2c_read_accel_xyz(int16_t *x, int16_t *y, int16_t *z);
   bool i2c_write_reg(uint8_t reg, uint8_t value);
-  bool i2c_probe_accel();
-  void i2c_recover_bus(const char *reason);
   void i2c_init_acc();
 
   // Data processing
@@ -121,29 +120,9 @@ class AqaraFP2Accel : public Component {
   bool prev_vib_state_{false};
   int output_angle_z_{0};
 
-  // FreeRTOS task management
-  TaskHandle_t task_handle_{nullptr};
-  SemaphoreHandle_t mutex_{nullptr};
-  uint32_t update_interval_ms_{100};
-  bool task_running_{false};
-
-  // ESP-IDF I2C configuration
-  i2c_port_t i2c_port_{I2C_NUM_0};
-  i2c_master_bus_handle_t bus_handle_{nullptr};
-  i2c_master_dev_handle_t dev_handle_{nullptr};
-  uint8_t sda_pin_{33};
-  uint8_t scl_pin_{32};
-  uint32_t frequency_{100000};  // 100kHz is much less prone to bus-stuck states on the FP2 board.
-  bool i2c_initialized_{false};
-  uint32_t consecutive_i2c_failures_{0};
+  uint32_t consecutive_read_failures_{0};
   uint32_t successful_sample_sets_{0};
   bool log_next_sample_set_{true};
-
-  // Static task function
-  static void accel_task_(void *param);
-
-  // Thread-safe task loop
-  void task_loop_();
 };
 
 }  // namespace aqara_fp2_accel
