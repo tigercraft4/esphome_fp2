@@ -69,6 +69,7 @@ CONF_ONTIME_PEOPLE_NUMBER = "ontime_people_number"
 CONF_REALTIME_PEOPLE_COUNTING = "realtime_people_counting"
 CONF_PEOPLE_COUNTING = "people_counting"
 CONF_WALKING_DISTANCE = "walking_distance"
+CONF_SLEEP_DATA = "sleep_data"
 CONF_SLEEP_PRESENCE = "sleep_presence"
 CONF_SLEEP_INOUT_STATE = "sleep_inout_state"
 CONF_SLEEP_STATE = "sleep_state"
@@ -270,6 +271,10 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_SLEEP_INOUT_STATE): binary_sensor.binary_sensor_schema(
                 icon="mdi:bed",
             ),
+            cv.Optional(CONF_SLEEP_DATA): text_sensor_.text_sensor_schema(
+                icon="mdi:sleep",
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            ),
             cv.Optional(CONF_SLEEP_STATE): text_sensor_.text_sensor_schema(
                 icon="mdi:sleep",
             ),
@@ -297,6 +302,7 @@ SENSOR_MAP = {
     CONF_WALKING_DISTANCE: (sensor.new_sensor, "set_walking_distance_sensor"),
     CONF_RADAR_SOFTWARE_VERSION: (text_sensor_.new_text_sensor, "set_radar_software_sensor"),
     CONF_RADAR_DEBUG: (text_sensor_.new_text_sensor, "set_radar_debug_sensor"),
+    CONF_SLEEP_DATA: (text_sensor_.new_text_sensor, "set_sleep_data_sensor"),
     CONF_SLEEP_STATE: (text_sensor_.new_text_sensor, "set_sleep_state_sensor"),
     CONF_SLEEP_EVENT: (text_sensor_.new_text_sensor, "set_sleep_event_sensor"),
     CONF_TARGET_POSTURE: (text_sensor_.new_text_sensor, "set_target_posture_sensor"),

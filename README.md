@@ -78,7 +78,7 @@ The ESPHome component exposes several SubIDs found in the stock firmware dump. D
 |--------|-------------|---------|-------|
 | `people_counting_report_enable` | `0x0158` | `true` | Enables people-counting reports. |
 | `people_number_enable` | `0x0162` | `true` | Enables current/ontime people-number reports. |
-| `target_type_enable` | `0x0163` | `true` | Stock app labels this as AI Person Detection. |
+| `target_type_enable` | `0x0163` | `false` | Stock app labels this as AI Person Detection; lab testing showed `true` can suppress target streaming. |
 | `dwell_time_enable` | `0x0172` | `false` | Enables dwell-time reporting path. |
 | `walking_distance_enable` | `0x0173` | `false` | Enables accumulated walking-distance reports. |
 | `thermodynamic_chart_enable` | `0x0138` | `true` | Enables thermodynamic chart reports; raw BLOB remains in `radar_debug`. |
@@ -96,6 +96,7 @@ Optional entities decoded from simple firmware-confirmed report wrappers:
 | `realtime_people_counting` | `0x0166` | `UINT32` sensor |
 | `people_counting` | `0x0155` | text sensor (`id=<n> ontime=<n> realtime=<n>`) |
 | `walking_distance` | `0x0174` | `UINT32` sensor |
+| `sleep_data` | `0x0159` | diagnostic text sensor with raw 12-byte blob plus little/big-endian word hypotheses |
 | `sleep_presence` | `0x0167` | binary sensor |
 | `sleep_inout_state` | `0x0171` | binary sensor |
 | `sleep_state` | `0x0161` | text sensor |

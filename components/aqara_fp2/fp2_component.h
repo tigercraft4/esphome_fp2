@@ -307,6 +307,9 @@ public:
   void set_sleep_state_sensor(text_sensor::TextSensor *sensor) {
       sleep_state_sensor_ = sensor;
   }
+  void set_sleep_data_sensor(text_sensor::TextSensor *sensor) {
+      sleep_data_sensor_ = sensor;
+  }
   void set_sleep_event_sensor(text_sensor::TextSensor *sensor) {
       sleep_event_sensor_ = sensor;
   }
@@ -368,6 +371,7 @@ protected:
   void handle_simple_uint8_binary_report_(const std::vector<uint8_t> &payload,
                                           binary_sensor::BinarySensor *sensor,
                                           const char *name);
+  void handle_sleep_data_report_(const std::vector<uint8_t> &payload);
   void handle_sleep_state_report_(const std::vector<uint8_t> &payload);
   void handle_sleep_event_report_(const std::vector<uint8_t> &payload);
   void handle_target_posture_report_(const std::vector<uint8_t> &payload);
@@ -444,6 +448,7 @@ protected:
   sensor::Sensor *walking_distance_sensor_{nullptr};
   text_sensor::TextSensor *radar_software_sensor_{nullptr};
   text_sensor::TextSensor *radar_debug_sensor_{nullptr};
+  text_sensor::TextSensor *sleep_data_sensor_{nullptr};
   text_sensor::TextSensor *sleep_state_sensor_{nullptr};
   text_sensor::TextSensor *sleep_event_sensor_{nullptr};
   text_sensor::TextSensor *target_posture_sensor_{nullptr};

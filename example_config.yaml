@@ -255,6 +255,8 @@ aqara_fp2:
     name: "People Counting"
   walking_distance:
     name: "Walking Distance"
+  sleep_data:
+    name: "Sleep Data"
   sleep_presence:
     name: "Sleep Presence"
   sleep_inout_state:

@@ -894,8 +894,11 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
       break;
 
     case AttrId::THERMO_DATA:
-    case AttrId::SLEEP_DATA:
       publish_radar_debug_("radar_report", attr_id, payload);
+      break;
+
+    case AttrId::SLEEP_DATA:
+      handle_sleep_data_report_(payload);
       break;
 
     case AttrId::SLEEP_STATE:
@@ -1032,6 +1035,52 @@ void FP2Component::handle_simple_uint8_binary_report_(const std::vector<uint8_t>
   ESP_LOGI(TAG, "%s report: %s", name, state ? "ON" : "OFF");
   if (sensor != nullptr) {
     sensor->publish_state(state);
+  }
+}
+
+void FP2Component::handle_sleep_data_report_(const std::vector<uint8_t> &payload) {
+  if (payload.size() < 5 || (payload[2] != 0x05 && payload[2] != 0x06)) {
+    publish_radar_debug_("sleep_data_malformed", AttrId::SLEEP_DATA, payload);
+    return;
+  }
+
+  uint16_t declared_len = (payload[3] << 8) | payload[4];
+  if (declared_len != 12 || payload.size() < 5 + declared_len) {
+    publish_radar_debug_("sleep_data_bad_len", AttrId::SLEEP_DATA, payload);
+    return;
+  }
+
+  publish_radar_debug_("radar_report", AttrId::SLEEP_DATA, payload);
+
+  std::vector<uint8_t> blob(payload.begin() + 5, payload.begin() + 17);
+  auto be32 = [&](size_t offset) -> uint32_t {
+    return ((uint32_t) blob[offset] << 24) |
+           ((uint32_t) blob[offset + 1] << 16) |
+           ((uint32_t) blob[offset + 2] << 8) |
+           (uint32_t) blob[offset + 3];
+  };
+  auto le32 = [&](size_t offset) -> uint32_t {
+    return ((uint32_t) blob[offset + 3] << 24) |
+           ((uint32_t) blob[offset + 2] << 16) |
+           ((uint32_t) blob[offset + 1] << 8) |
+           (uint32_t) blob[offset];
+  };
+
+  std::string state = "raw=" + format_payload_hex_(blob, 12) +
+                      " le=" + std::to_string(le32(0)) + "," +
+                      std::to_string(le32(4)) + "," +
+                      std::to_string(le32(8)) +
+                      " be=" + std::to_string(be32(0)) + "," +
+                      std::to_string(be32(4)) + "," +
+                      std::to_string(be32(8)) +
+                      " legacy_guess=target:" + std::to_string(blob[0]) +
+                      " count:" + std::to_string(blob[9]) +
+                      " motion:" + std::to_string(blob[10]) +
+                      " stage:" + std::to_string(blob[11]);
+
+  ESP_LOGI(TAG, "sleep_data report: %s", state.c_str());
+  if (sleep_data_sensor_ != nullptr) {
+    sleep_data_sensor_->publish_state(state);
   }
 }
 
