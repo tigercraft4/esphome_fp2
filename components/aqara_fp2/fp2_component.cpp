@@ -186,9 +186,7 @@ void FP2Component::perform_reset_() {
   }
 
   if (this->location_report_switch_ != nullptr) {
-    // Default to OFF for internal state until we know better, or optimistic?
-    // Device usually starts with it OFF.
-    this->location_report_switch_->publish_state(false);
+    this->location_report_switch_->publish_state(this->location_reporting_active_);
   }
 }
 
@@ -208,6 +206,7 @@ void FP2Component::force_detection_config() {
     this->location_report_switch_->publish_state(true);
   }
 
+  enqueue_command_(OpCode::WRITE, AttrId::WORK_MODE, (uint8_t) 3);
   enqueue_command_(OpCode::WRITE, AttrId::MOTION_DETECT, (uint8_t) 1);
   enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT, (uint8_t) 1);
   enqueue_command_(OpCode::WRITE, AttrId::MONITOR_MODE, (uint8_t) 0);
@@ -307,6 +306,11 @@ void FP2Component::set_ai_target_filter_enabled(bool enabled) {
   enqueue_command_(OpCode::WRITE, AttrId::TARGET_TYPE_ENABLE, enabled);
 }
 
+void FP2Component::calibrate_empty_room() {
+  ESP_LOGW(TAG, "Starting candidate empty-room calibration/reset via reset_absent_status");
+  enqueue_command_(OpCode::WRITE, AttrId::RESET_ABSENT_STATUS, true);
+}
+
 void FP2Component::reset_radar() {
   ESP_LOGI(TAG, "Resetting radar module via diagnostic action");
   perform_reset_();
@@ -339,6 +343,7 @@ void FP2Component::check_initialization_() {
     init_done_ = true;
 
     // 1. Basic Settings
+    enqueue_command_(OpCode::WRITE, AttrId::WORK_MODE, (uint8_t) 3);
     enqueue_command_(OpCode::WRITE, AttrId::MOTION_DETECT, (uint8_t) 1);
     enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT, (uint8_t) 1);
     if (location_reporting_active_) {
@@ -743,6 +748,15 @@ void FP2Component::handle_parsed_frame_(uint8_t type, AttrId attr_id,
     case OpCode::RESPONSE:
       handle_response_(attr_id, payload);
       break;
+    case OpCode::READ:
+      if (payload.size() > 2) {
+        handle_response_(attr_id, payload);
+      } else {
+        publish_radar_debug_("unexpected_read_opcode", attr_id, payload);
+        ESP_LOGW(TAG, "Unexpected READ opcode from radar for 0x%04X (%s)",
+                 (uint16_t) attr_id, attr_id_to_string_(attr_id));
+      }
+      break;
     default:
       publish_radar_debug_("unhandled_opcode", attr_id, payload);
       ESP_LOGW(TAG, "Unhandled OpCode: %d", type);
@@ -900,6 +914,11 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
       handle_sleep_event_report_(payload);
       break;
 
+    case AttrId::RESET_ABSENT_STATUS:
+      publish_radar_debug_("radar_report", attr_id, payload);
+      ESP_LOGI(TAG, "Received reset_absent_status report");
+      break;
+
     default:
       publish_radar_debug_("unhandled_report", attr_id, payload);
       ESP_LOGW(TAG, "Unhandled report 0x%04X (%s)", (uint16_t) attr_id, attr_id_to_string_(attr_id));
@@ -919,6 +938,13 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
   }
 
   uint8_t count = payload[5];
+  uint32_t now = millis();
+  if (count != last_location_target_count_ || now - last_location_debug_millis_ > 5000) {
+    ESP_LOGD(TAG, "Location tracking report: targets=%u payload_len=%u",
+             count, static_cast<unsigned>(payload.size()));
+    last_location_target_count_ = count;
+    last_location_debug_millis_ = now;
+  }
 
   // Build binary buffer: [count][target1 14 bytes][target2 14 bytes]...
   // Each target is 14 bytes: id(1), x(2), y(2), z(2), velocity(2), snr(2), classifier(1), posture(1), active(1)

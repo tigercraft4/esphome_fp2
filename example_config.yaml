@@ -85,10 +85,36 @@ api:
       then:
         - lambda: |-
             id(fp2).set_ai_target_filter_enabled(enabled);
+    - action: fp2_calibrate_empty_room
+      then:
+        - lambda: |-
+            id(fp2).calibrate_empty_room();
     - action: fp2_reset_radar
       then:
         - lambda: |-
             id(fp2).reset_radar();
+
+button:
+  - platform: template
+    name: "FP2 Force Detection Config"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(fp2).force_detection_config();
+
+  - platform: template
+    name: "FP2 Calibrate Empty Room"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(fp2).calibrate_empty_room();
+
+  - platform: template
+    name: "FP2 Reset Radar"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(fp2).reset_radar();
 
 ota:
   - platform: esphome
@@ -134,7 +160,7 @@ aqara_fp2:
   # These mirror stock firmware SubIDs 0x0156-0x0174.
   people_counting_report_enable: true
   people_number_enable: true
-  target_type_enable: true
+  target_type_enable: false
   dwell_time_enable: false
   walking_distance_enable: false
   thermodynamic_chart_enable: true

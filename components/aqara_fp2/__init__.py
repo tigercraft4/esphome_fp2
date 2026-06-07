@@ -203,7 +203,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_POSTURE_REPORT_ENABLE): cv.boolean,
             cv.Optional(CONF_PEOPLE_COUNTING_REPORT_ENABLE, default=True): cv.boolean,
             cv.Optional(CONF_PEOPLE_NUMBER_ENABLE, default=True): cv.boolean,
-            cv.Optional(CONF_TARGET_TYPE_ENABLE, default=True): cv.boolean,
+            cv.Optional(CONF_TARGET_TYPE_ENABLE, default=False): cv.boolean,
             cv.Optional(CONF_DWELL_TIME_ENABLE, default=False): cv.boolean,
             cv.Optional(CONF_WALKING_DISTANCE_ENABLE, default=False): cv.boolean,
             cv.Optional(CONF_THERMODYNAMIC_CHART_ENABLE, default=True): cv.boolean,

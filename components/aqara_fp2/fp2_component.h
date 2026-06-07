@@ -338,6 +338,7 @@ public:
   void write_attr_bool(uint16_t attr_id, bool value);
   void set_work_mode(uint8_t mode);
   void set_ai_target_filter_enabled(bool enabled);
+  void calibrate_empty_room();
   void reset_radar();
 
   // Grid format conversion
@@ -404,7 +405,7 @@ protected:
   bool has_posture_report_enable_{false};
   bool people_counting_report_enable_{true};
   bool people_number_enable_{true};
-  bool target_type_enable_{true};
+  bool target_type_enable_{false};
   bool dwell_time_enable_{false};
   bool walking_distance_enable_{false};
   bool thermodynamic_chart_enable_{true};
@@ -426,7 +427,9 @@ protected:
   std::vector<FP2Zone*> zones_;
   text_sensor::TextSensor *target_tracking_sensor_{nullptr};
   FP2LocationSwitch *location_report_switch_{nullptr};
-  bool location_reporting_active_{false};
+  bool location_reporting_active_{true};
+  uint32_t last_location_debug_millis_{0};
+  uint8_t last_location_target_count_{0xFF};
 
   // Grid text sensors
   text_sensor::TextSensor *edge_label_grid_sensor_{nullptr};
