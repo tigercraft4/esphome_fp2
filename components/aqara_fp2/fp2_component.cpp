@@ -39,6 +39,7 @@ const char* FP2Component::attr_id_to_string_(AttrId attr_id) {
     case AttrId::INTERFERENCE_MAP: return "interference_source";
     case AttrId::PRESENCE_DETECT_SENSITIVITY: return "presence_detection_sensitivity";
     case AttrId::LOCATION_REPORT_ENABLE: return "location_report_enable";
+    case AttrId::RESET_ABSENT_STATUS: return "reset_absent_status";
     case AttrId::ZONE_MAP: return "zone_detect_setting";
     case AttrId::DETECT_ZONE_MOTION: return "detect_zone_motion";
     case AttrId::WORK_MODE: return "work_mode";
@@ -84,6 +85,10 @@ const char* FP2Component::attr_id_to_string_(AttrId attr_id) {
     case AttrId::WALK_DISTANCE_ENABLE: return "walking_distance_enable";
     case AttrId::WALK_DISTANCE_ALL: return "walking_distance_all";
     case AttrId::SLEEP_EVENT: return "sleep_event";
+    case AttrId::SLEEP_EVENT_DESCRIPTOR: return "sleep_event_descriptor";
+    case AttrId::SLEEP_BED_HEIGHT: return "sleep_bed_height";
+    case AttrId::OVERHEAD_HEIGHT: return "overhead_height";
+    case AttrId::FALL_DELAY_TIME: return "fall_delay_time";
     case AttrId::DEBUG_LOG: return "debug_log";
     case AttrId::ZONE_ACTIVATION_LIST: return "aux_data";
     case AttrId::RADAR_FLASH_ID: return "radar_flash_id";
@@ -155,6 +160,7 @@ void FP2Component::setup() {
 
   // Reset internal state
   waiting_for_ack_attr_id_ = AttrId::INVALID;
+  waiting_for_response_attr_id_ = AttrId::INVALID;
 
   // GPIO Reset
   perform_reset_();
@@ -163,6 +169,7 @@ void FP2Component::setup() {
 void FP2Component::perform_reset_() {
   command_queue_.clear();
   waiting_for_ack_attr_id_ = AttrId::INVALID;
+  waiting_for_response_attr_id_ = AttrId::INVALID;
   init_done_ = false;
   last_radar_frame_millis_ = 0;
   last_heartbeat_millis_ = 0;
@@ -230,6 +237,74 @@ void FP2Component::read_detection_config() {
   enqueue_read_(AttrId::TARGET_TYPE_ENABLE);
   enqueue_read_(AttrId::SLEEP_REPORT_ENABLE);
   enqueue_read_(AttrId::POSTURE_REPORT_ENABLE);
+}
+
+void FP2Component::read_mode_calibration_config() {
+  ESP_LOGI(TAG, "Queueing radar mode/calibration/fall/sleep config reads");
+  enqueue_read_(AttrId::WORK_MODE);
+  enqueue_read_(AttrId::MONITOR_MODE);
+  enqueue_read_(AttrId::TARGET_TYPE_ENABLE);
+  enqueue_read_(AttrId::RADAR_CALIBRATION_RESULT);
+  enqueue_read_(AttrId::RESET_ABSENT_STATUS);
+  enqueue_read_(AttrId::MOTION_DETECT);
+  enqueue_read_(AttrId::PRESENCE_DETECT);
+  enqueue_read_(AttrId::PRESENCE_DETECT_SENSITIVITY);
+  enqueue_read_(AttrId::LOCATION_REPORT_ENABLE);
+  enqueue_read_(AttrId::FALL_DETECTION);
+  enqueue_read_(AttrId::FALL_SENSITIVITY);
+  enqueue_read_(AttrId::FALL_OVERTIME_REPORT_PERIOD);
+  enqueue_read_(AttrId::FALL_OVERTIME_DETECTION);
+  enqueue_read_(AttrId::FALL_DELAY_TIME);
+  enqueue_read_(AttrId::SLEEP_REPORT_ENABLE);
+  enqueue_read_(AttrId::POSTURE_REPORT_ENABLE);
+  enqueue_read_(AttrId::SLEEP_MOUNT_POSITION);
+  enqueue_read_(AttrId::SLEEP_ZONE_SIZE);
+  enqueue_read_(AttrId::SLEEP_BED_HEIGHT);
+  enqueue_read_(AttrId::OVERHEAD_HEIGHT);
+  enqueue_read_(AttrId::WALL_CORNER_POS);
+  enqueue_read_(AttrId::SLEEP_STATE);
+  enqueue_read_(AttrId::SLEEP_PRESENCE);
+  enqueue_read_(AttrId::SLEEP_INOUT_STATE);
+  enqueue_read_(AttrId::SLEEP_EVENT);
+  enqueue_read_(AttrId::SLEEP_EVENT_DESCRIPTOR);
+}
+
+void FP2Component::read_attr(uint16_t attr_id) {
+  AttrId attr = (AttrId) attr_id;
+  ESP_LOGI(TAG, "Queueing raw radar read for %s (0x%04X)", attr_id_to_string_(attr), attr_id);
+  enqueue_read_(attr);
+}
+
+void FP2Component::write_attr_uint8(uint16_t attr_id, uint8_t value) {
+  AttrId attr = (AttrId) attr_id;
+  ESP_LOGI(TAG, "Queueing raw UINT8 radar write for %s (0x%04X) = %u",
+           attr_id_to_string_(attr), attr_id, value);
+  enqueue_command_(OpCode::WRITE, attr, value);
+}
+
+void FP2Component::write_attr_uint16(uint16_t attr_id, uint16_t value) {
+  AttrId attr = (AttrId) attr_id;
+  ESP_LOGI(TAG, "Queueing raw UINT16 radar write for %s (0x%04X) = %u",
+           attr_id_to_string_(attr), attr_id, value);
+  enqueue_command_(OpCode::WRITE, attr, value);
+}
+
+void FP2Component::write_attr_bool(uint16_t attr_id, bool value) {
+  AttrId attr = (AttrId) attr_id;
+  ESP_LOGI(TAG, "Queueing raw BOOL radar write for %s (0x%04X) = %u",
+           attr_id_to_string_(attr), attr_id, value ? 1 : 0);
+  enqueue_command_(OpCode::WRITE, attr, value);
+}
+
+void FP2Component::set_work_mode(uint8_t mode) {
+  ESP_LOGI(TAG, "Setting radar work mode candidate to %u", mode);
+  enqueue_command_(OpCode::WRITE, AttrId::WORK_MODE, mode);
+}
+
+void FP2Component::set_ai_target_filter_enabled(bool enabled) {
+  ESP_LOGI(TAG, "Setting radar AI target filter to %s", enabled ? "enabled" : "disabled");
+  target_type_enable_ = enabled;
+  enqueue_command_(OpCode::WRITE, AttrId::TARGET_TYPE_ENABLE, enabled);
 }
 
 void FP2Component::reset_radar() {
@@ -438,6 +513,19 @@ void FP2Component::process_command_queue_() {
     return; // Still waiting
   }
 
+  if (waiting_for_response_attr_id_ != AttrId::INVALID) {
+    if (now - last_command_sent_millis_ > READ_TIMEOUT_MS) {
+      if (!command_queue_.empty()) {
+        auto &cmd = command_queue_.front();
+        ESP_LOGD(TAG, "Read %s (0x%04X) timed out. Dropping.",
+                 attr_id_to_string_(cmd.attr_id), (uint16_t) cmd.attr_id);
+        command_queue_.pop_front();
+      }
+      waiting_for_response_attr_id_ = AttrId::INVALID;
+    }
+    return;
+  }
+
   // Not waiting, send next
   if (!command_queue_.empty()) {
     send_next_command_();
@@ -488,12 +576,14 @@ void FP2Component::send_next_command_() {
     return;
 
   auto &cmd = command_queue_.front();
-  write_command_frame_(cmd, cmd.type == OpCode::WRITE);
+  write_command_frame_(cmd, cmd.type == OpCode::WRITE || cmd.type == OpCode::READ);
 
-  // Only WRITE commands expect an ACK from the radar
-  // ACK and Reverse Read Response packets don't get ACKed
+  // WRITE commands expect ACK. Host-initiated READ commands expect RESPONSE.
+  // ACK and reverse-read response packets do not get ACKed.
   if (cmd.type == OpCode::WRITE) {
     waiting_for_ack_attr_id_ = cmd.attr_id;
+  } else if (cmd.type == OpCode::READ) {
+    waiting_for_response_attr_id_ = cmd.attr_id;
   } else {
     command_queue_.pop_front();
   }
@@ -1004,6 +1094,15 @@ void FP2Component::handle_response_(AttrId attr_id, const std::vector<uint8_t> &
     ESP_LOGD(TAG, "Received Response for 0x%04X (%s) with %u bytes",
              (uint16_t) attr_id, attr_id_to_string_(attr_id),
              static_cast<unsigned>(payload.size()));
+    if (waiting_for_response_attr_id_ == attr_id) {
+      waiting_for_response_attr_id_ = AttrId::INVALID;
+      if (!command_queue_.empty()) {
+        command_queue_.pop_front();
+      }
+    } else if (waiting_for_response_attr_id_ != AttrId::INVALID) {
+      ESP_LOGW(TAG, "Unexpected response 0x%04X (Waiting for 0x%04X)",
+               (uint16_t) attr_id, (uint16_t) waiting_for_response_attr_id_);
+    }
   }
 }
 

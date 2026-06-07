@@ -34,6 +34,61 @@ api:
         - api.respond:
             data: !lambda |-
               id(fp2).json_get_map_data(root);
+    - action: fp2_force_detection_config
+      then:
+        - lambda: |-
+            id(fp2).force_detection_config();
+    - action: fp2_read_detection_config
+      then:
+        - lambda: |-
+            id(fp2).read_detection_config();
+    - action: fp2_read_mode_calibration_config
+      then:
+        - lambda: |-
+            id(fp2).read_mode_calibration_config();
+    - action: fp2_read_attr
+      variables:
+        attr: int
+      then:
+        - lambda: |-
+            id(fp2).read_attr((uint16_t) attr);
+    - action: fp2_write_attr_uint8
+      variables:
+        attr: int
+        value: int
+      then:
+        - lambda: |-
+            id(fp2).write_attr_uint8((uint16_t) attr, (uint8_t) value);
+    - action: fp2_write_attr_uint16
+      variables:
+        attr: int
+        value: int
+      then:
+        - lambda: |-
+            id(fp2).write_attr_uint16((uint16_t) attr, (uint16_t) value);
+    - action: fp2_write_attr_bool
+      variables:
+        attr: int
+        value: bool
+      then:
+        - lambda: |-
+            id(fp2).write_attr_bool((uint16_t) attr, value);
+    - action: fp2_set_work_mode
+      variables:
+        mode: int
+      then:
+        - lambda: |-
+            id(fp2).set_work_mode((uint8_t) mode);
+    - action: fp2_set_ai_target_filter
+      variables:
+        enabled: bool
+      then:
+        - lambda: |-
+            id(fp2).set_ai_target_filter_enabled(enabled);
+    - action: fp2_reset_radar
+      then:
+        - lambda: |-
+            id(fp2).reset_radar();
 
 ota:
   - platform: esphome

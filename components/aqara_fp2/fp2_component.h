@@ -139,6 +139,10 @@ enum class AttrId : uint16_t {
     WALK_DISTANCE_ENABLE            = 0x0173, // Walking distance
     WALK_DISTANCE_ALL               = 0x0174,
     SLEEP_EVENT                     = 0x0176,
+    SLEEP_EVENT_DESCRIPTOR          = 0x0177,
+    SLEEP_BED_HEIGHT                = 0x0178,
+    OVERHEAD_HEIGHT                 = 0x0179,
+    FALL_DELAY_TIME                 = 0x0180,
     INTERFERENCE_MAP                = 0x0110, // Interference map (40B)
     ENTRY_EXIT_MAP                  = 0x0109, // Enter/exit zones (40B)
     EDGE_MAP                        = 0x0107, // Detection boundary (40B)
@@ -149,6 +153,7 @@ enum class AttrId : uint16_t {
     DEVICE_DIRECTION                = 0x0143,
     ANGLE_SENSOR_DATA               = 0x0120,
     LOCATION_REPORT_ENABLE          = 0x0112,
+    RESET_ABSENT_STATUS             = 0x0113,
     ZONE_PRESENCE                   = 0x0142,
     LOCATION_TRACKING_DATA          = 0x0117,
     THERMO_EN                       = 0x0138,
@@ -326,6 +331,13 @@ public:
   void set_location_reporting_enabled(bool enabled);
   void force_detection_config();
   void read_detection_config();
+  void read_mode_calibration_config();
+  void read_attr(uint16_t attr_id);
+  void write_attr_uint8(uint16_t attr_id, uint8_t value);
+  void write_attr_uint16(uint16_t attr_id, uint16_t value);
+  void write_attr_bool(uint16_t attr_id, bool value);
+  void set_work_mode(uint8_t mode);
+  void set_ai_target_filter_enabled(bool enabled);
   void reset_radar();
 
   // Grid format conversion
@@ -471,8 +483,10 @@ protected:
   // We track the SubID of tAttrId::INVALID command we are currently waiting for an ACK for.
   // 0xFFFF = Not waiting.
   AttrId waiting_for_ack_attr_id_{AttrId::INVALID};
+  AttrId waiting_for_response_attr_id_{AttrId::INVALID};
   uint32_t last_command_sent_millis_{0};
   static const uint32_t ACK_TIMEOUT_MS = 500;
+  static const uint32_t READ_TIMEOUT_MS = 500;
   static const uint8_t MAX_RETRIES = 3;
 
   void enqueue_command_(OpCode type, AttrId attr_id, uint8_t byte_val);
