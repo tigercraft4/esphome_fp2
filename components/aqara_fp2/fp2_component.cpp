@@ -831,6 +831,8 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
         }
         break;
       }
+      // Malformed heartbeat: stop here instead of falling through to WORK_MODE.
+      break;
 
     case AttrId::WORK_MODE:
         if (payload.size() == 4 && payload[2] == 0x00) {
@@ -838,6 +840,7 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             publish_radar_debug_("radar_report", attr_id, payload);
             break;
         }
+        break;
 
     case AttrId::DETECT_ZONE_MOTION:
         if (payload.size() == 5 && payload[2] == 0x01) {
@@ -853,6 +856,7 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             //}
             break;
         }
+        break;
 
     case AttrId::MOTION_DETECT:
         if (payload.size() == 4 && payload[2]  == 0x00) {
@@ -863,6 +867,7 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             ESP_LOGI(TAG, "Received global motion report: %u", state);
             break;
         }
+        break;
 
     case AttrId::PRESENCE_DETECT:
         if (payload.size() == 4 && payload[2]  == 0x00) {

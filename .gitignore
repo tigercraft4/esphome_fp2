@@ -12,6 +12,9 @@ wheels/
 .esphome
 test_fp2_configuration.yaml
 
+# PlatformIO build artifacts (fp2_bridge sketch)
+.pio/
+
 FIX_COMPONENT_ENTITY_SPEC_DEVLOG.md
 FP2_CARD_README.md
 FP2_SENSOR_HASS_TARGET_STATE.md
