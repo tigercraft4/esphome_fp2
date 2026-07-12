@@ -11,6 +11,7 @@ esp32:
     advanced:
       ignore_efuse_mac_crc: true
       ignore_efuse_custom_mac: true
+      sram1_as_iram: true
 
 wifi:
   ssid: !secret wifi_ssid
