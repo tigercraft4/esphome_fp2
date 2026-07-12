@@ -3,6 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -344,6 +345,16 @@ void FP2Component::reset_radar() {
   perform_reset_();
 }
 
+void FP2Component::set_edge_auto_enabled(bool enabled) {
+  ESP_LOGI(TAG, "Setting edge auto detection to %s", enabled ? "enabled" : "disabled");
+  enqueue_command_(OpCode::WRITE, AttrId::EDGE_AUTO_ENABLE, enabled);
+}
+
+void FP2Component::set_interference_auto_enabled(bool enabled) {
+  ESP_LOGI(TAG, "Setting interference auto detection to %s", enabled ? "enabled" : "disabled");
+  enqueue_command_(OpCode::WRITE, AttrId::INTERFERENCE_AUTO_ENABLE, enabled);
+}
+
 void FP2LocationSwitch::write_state(bool state) {
   if (this->parent_ != nullptr) {
     this->parent_->set_location_reporting_enabled(state);
@@ -448,6 +459,12 @@ void FP2Component::check_initialization_() {
       // Structure: UINT16 (High=ID, Low=Sens)
       uint16_t sens_val = (zone->id << 8) | (zone->sensitivity & 0xFF);
       enqueue_command_(OpCode::WRITE, AttrId::ZONE_SENSITIVITY, sens_val);
+
+      // c. Send Zone Type (0x0152) if configured: UINT16 (High=ID, Low=Type)
+      if (zone->has_zone_type) {
+        uint16_t type_val = (zone->id << 8) | (zone->zone_type & 0xFF);
+        enqueue_command_(OpCode::WRITE, AttrId::DETECT_ZONE_TYPE, type_val);
+      }
 
       activations[zone->id] = zone->id;
     }
@@ -1007,6 +1024,11 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
   std::vector<uint8_t> binary_data;
   binary_data.push_back(count);
 
+  // Corner-mount coordinate scale (PROTOCOL 5.1): X/Y raw span 800 units = 7 m.
+  static constexpr float METERS_PER_UNIT = 7.0f / 800.0f;
+  float nearest = NAN;
+  uint8_t valid = 0;
+
   for (int i = 0; i < count; i++) {
     int offset = 6 + (i * 14);
     if (offset + 14 > payload.size())
@@ -1016,6 +1038,14 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
     binary_data.insert(binary_data.end(),
                        payload.begin() + offset,
                        payload.begin() + offset + 14);
+
+    // Target layout: id(1), X s16(2), Y s16(2), ... (big endian)
+    int16_t x = (int16_t)((payload[offset + 1] << 8) | payload[offset + 2]);
+    int16_t y = (int16_t)((payload[offset + 3] << 8) | payload[offset + 4]);
+    float dist_m = sqrtf((float) x * x + (float) y * y) * METERS_PER_UNIT;
+    if (std::isnan(nearest) || dist_m < nearest)
+      nearest = dist_m;
+    valid++;
   }
 
   // Base64 encode the binary data
@@ -1023,6 +1053,18 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
 
   if (this->target_tracking_sensor_ != nullptr) {
     this->target_tracking_sensor_->publish_state(base64_str);
+  }
+
+  // Derived numeric sensors (throttled to ~1 Hz; the raw stream is 10-20 Hz).
+  if ((target_count_sensor_ != nullptr || nearest_distance_sensor_ != nullptr) &&
+      now - last_target_publish_millis_ >= 1000) {
+    last_target_publish_millis_ = now;
+    if (target_count_sensor_ != nullptr) {
+      target_count_sensor_->publish_state(valid);
+    }
+    if (nearest_distance_sensor_ != nullptr) {
+      nearest_distance_sensor_->publish_state(nearest);  // NAN -> unknown when no targets
+    }
   }
 }
 
@@ -1105,31 +1147,18 @@ void FP2Component::handle_sleep_data_report_(const std::vector<uint8_t> &payload
 
   publish_radar_debug_("radar_report", AttrId::SLEEP_DATA, payload);
 
+  // PROTOCOL 4.2.5: 12-byte item -> TargetID(0), ZoneID(1), Presence(2),
+  // followed by 9 bytes of vital-sign / sleep-stage data (format still unknown).
   std::vector<uint8_t> blob(payload.begin() + 5, payload.begin() + 17);
-  auto be32 = [&](size_t offset) -> uint32_t {
-    return ((uint32_t) blob[offset] << 24) |
-           ((uint32_t) blob[offset + 1] << 16) |
-           ((uint32_t) blob[offset + 2] << 8) |
-           (uint32_t) blob[offset + 3];
-  };
-  auto le32 = [&](size_t offset) -> uint32_t {
-    return ((uint32_t) blob[offset + 3] << 24) |
-           ((uint32_t) blob[offset + 2] << 16) |
-           ((uint32_t) blob[offset + 1] << 8) |
-           (uint32_t) blob[offset];
-  };
+  uint8_t target_id = blob[0];
+  uint8_t zone_id = blob[1];
+  uint8_t presence = blob[2];
+  std::vector<uint8_t> vitals(blob.begin() + 3, blob.end());
 
-  std::string state = "raw=" + format_payload_hex_(blob, 12) +
-                      " le=" + std::to_string(le32(0)) + "," +
-                      std::to_string(le32(4)) + "," +
-                      std::to_string(le32(8)) +
-                      " be=" + std::to_string(be32(0)) + "," +
-                      std::to_string(be32(4)) + "," +
-                      std::to_string(be32(8)) +
-                      " legacy_guess=target:" + std::to_string(blob[0]) +
-                      " count:" + std::to_string(blob[9]) +
-                      " motion:" + std::to_string(blob[10]) +
-                      " stage:" + std::to_string(blob[11]);
+  std::string state = "target=" + std::to_string(target_id) +
+                      " zone=" + std::to_string(zone_id) +
+                      " presence=" + std::to_string(presence) +
+                      " vitals=" + format_payload_hex_(vitals, 9);
 
   ESP_LOGI(TAG, "sleep_data report: %s", state.c_str());
   if (sleep_data_sensor_ != nullptr) {

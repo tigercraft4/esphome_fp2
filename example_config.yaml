@@ -131,6 +131,21 @@ button:
       - lambda: |-
           id(fp2).reset_radar();
 
+  # Let the radar auto-learn room edges / interference sources (0x0150 / 0x0139)
+  # instead of drawing the grids by hand.
+  - platform: template
+    name: "FP2 Auto Edge Detection"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(fp2).set_edge_auto_enabled(true);
+  - platform: template
+    name: "FP2 Auto Interference Detection"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(fp2).set_interference_auto_enabled(true);
+
 ota:
   - platform: esphome
     password: !secret ota_password
@@ -252,6 +267,9 @@ aqara_fp2:
       # Zone motion (0x0115) reports momentary events; the sensor is held ON and
       # released after this debounce timeout with no new movement (default 5s).
       motion_timeout: 5s
+      # Optional furniture/scene type (0x0152) to cut false positives.
+      # One of: tv, green_plant, leisure, dressing, closet, desk, shower, stairs.
+      zone_type: leisure
       presence:
         name: "Sofa Zone Presence"
       motion:
@@ -273,6 +291,11 @@ aqara_fp2:
     name: "People Counting"
   walking_distance:
     name: "Walking Distance"
+  # Derived from the location tracking stream (0x0117).
+  target_count:
+    name: "Target Count"
+  nearest_distance:
+    name: "Nearest Target Distance"
   sleep_data:
     name: "Sleep Data"
   sleep_presence:

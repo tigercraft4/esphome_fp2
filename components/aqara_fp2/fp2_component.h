@@ -84,6 +84,13 @@ struct FP2Zone : public Component {
     this->publish_motion(false);
   }
 
+  // Zone furniture/scene type (0x0152). Helps the radar reject false
+  // positives from TVs, plants, etc. See ZONE_TYPES in __init__.py.
+  void set_zone_type(uint8_t t) {
+    this->zone_type = t;
+    this->has_zone_type = true;
+  }
+
   uint8_t id;
   esphome::binary_sensor::BinarySensor *presence_sensor{nullptr};
   esphome::binary_sensor::BinarySensor *motion_sensor{nullptr};
@@ -93,6 +100,8 @@ struct FP2Zone : public Component {
   uint32_t motion_timeout_ms{5000};
   uint32_t last_motion_millis{0};
   bool motion_active{false};
+  uint8_t zone_type{0};
+  bool has_zone_type{false};
 };
 
 class FP2Component;
@@ -326,6 +335,8 @@ public:
   void set_walking_distance_sensor(sensor::Sensor *sensor) {
       walking_distance_sensor_ = sensor;
   }
+  void set_target_count_sensor(sensor::Sensor *sensor) { target_count_sensor_ = sensor; }
+  void set_nearest_distance_sensor(sensor::Sensor *sensor) { nearest_distance_sensor_ = sensor; }
   void set_radar_software_sensor(text_sensor::TextSensor *sensor) {
       radar_software_sensor_ = sensor;
   }
@@ -373,6 +384,8 @@ public:
   void set_ai_target_filter_enabled(bool enabled);
   void calibrate_empty_room();
   void reset_radar();
+  void set_edge_auto_enabled(bool enabled);
+  void set_interference_auto_enabled(bool enabled);
 
   // Grid format conversion
   std::string grid_to_hex_card_format(const GridMap &grid);
@@ -464,6 +477,7 @@ protected:
   bool location_reporting_active_{true};
   uint32_t last_location_debug_millis_{0};
   uint8_t last_location_target_count_{0xFF};
+  uint32_t last_target_publish_millis_{0};
 
   // Grid text sensors
   text_sensor::TextSensor *edge_label_grid_sensor_{nullptr};
@@ -476,6 +490,8 @@ protected:
   sensor::Sensor *ontime_people_number_sensor_{nullptr};
   sensor::Sensor *realtime_people_counting_sensor_{nullptr};
   sensor::Sensor *walking_distance_sensor_{nullptr};
+  sensor::Sensor *target_count_sensor_{nullptr};
+  sensor::Sensor *nearest_distance_sensor_{nullptr};
   text_sensor::TextSensor *radar_software_sensor_{nullptr};
   text_sensor::TextSensor *radar_debug_sensor_{nullptr};
   text_sensor::TextSensor *sleep_data_sensor_{nullptr};

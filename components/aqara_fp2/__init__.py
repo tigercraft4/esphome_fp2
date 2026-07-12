@@ -48,6 +48,9 @@ CONF_ZONES = "zones"
 CONF_GRID = "grid"
 CONF_SENSITIVITY = "sensitivity"
 CONF_MOTION_TIMEOUT = "motion_timeout"
+CONF_ZONE_TYPE = "zone_type"
+CONF_TARGET_COUNT = "target_count"
+CONF_NEAREST_DISTANCE = "nearest_distance"
 
 # New Options
 CONF_RADAR_RESET_PIN = "radar_reset_pin"
@@ -92,6 +95,19 @@ SENSITIVITY_LEVELS = {
     "low": 1,
     "medium": 2,
     "high": 3,
+}
+
+# Zone furniture/scene type (0x0152). From reverse-engineering PROTOCOL.md.
+ZONE_TYPES = {
+    "none": 0,
+    "tv": 2,
+    "green_plant": 10,
+    "leisure": 11,
+    "dressing": 13,
+    "closet": 14,
+    "desk": 15,
+    "shower": 23,
+    "stairs": 36,
 }
 
 
@@ -183,6 +199,7 @@ ZONE_SCHEMA = (
             cv.GenerateID(CONF_ID): cv.declare_id(FP2Zone),
             cv.Required(CONF_GRID): parse_ascii_grid,
             cv.Optional(CONF_MOTION_TIMEOUT, default="5s"): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_ZONE_TYPE): cv.enum(ZONE_TYPES),
             cv.Optional("zone_map_sensor"): text_sensor_.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
         }
     ).extend(ZONE_BASE_SCHEMA)
@@ -266,6 +283,17 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=0,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
+            cv.Optional(CONF_TARGET_COUNT): sensor.sensor_schema(
+                icon="mdi:account-group",
+                accuracy_decimals=0,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_NEAREST_DISTANCE): sensor.sensor_schema(
+                unit_of_measurement="m",
+                icon="mdi:ruler",
+                accuracy_decimals=2,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
             cv.Optional(CONF_SLEEP_PRESENCE): binary_sensor.binary_sensor_schema(
                 device_class=DEVICE_CLASS_OCCUPANCY,
                 icon="mdi:bed",
@@ -302,6 +330,8 @@ SENSOR_MAP = {
     CONF_ONTIME_PEOPLE_NUMBER: (sensor.new_sensor, "set_ontime_people_number_sensor"),
     CONF_REALTIME_PEOPLE_COUNTING: (sensor.new_sensor, "set_realtime_people_counting_sensor"),
     CONF_WALKING_DISTANCE: (sensor.new_sensor, "set_walking_distance_sensor"),
+    CONF_TARGET_COUNT: (sensor.new_sensor, "set_target_count_sensor"),
+    CONF_NEAREST_DISTANCE: (sensor.new_sensor, "set_nearest_distance_sensor"),
     CONF_RADAR_SOFTWARE_VERSION: (text_sensor_.new_text_sensor, "set_radar_software_sensor"),
     CONF_RADAR_DEBUG: (text_sensor_.new_text_sensor, "set_radar_debug_sensor"),
     CONF_SLEEP_DATA: (text_sensor_.new_text_sensor, "set_sleep_data_sensor"),
@@ -342,6 +372,9 @@ async def to_code(config):
             await cg.register_component(var, zone_conf)
 
             cg.add(var.set_motion_timeout(zone_conf[CONF_MOTION_TIMEOUT].total_milliseconds))
+
+            if CONF_ZONE_TYPE in zone_conf:
+                cg.add(var.set_zone_type(zone_conf[CONF_ZONE_TYPE]))
 
             # Create sensors if provided
             for key, (new, funcName) in ZONE_SENSOR_MAP.items():
