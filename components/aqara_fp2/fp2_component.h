@@ -59,12 +59,40 @@ struct FP2Zone : public Component {
     }
   }
 
+  // Zone motion events (0x0115) are momentary. Hold the motion sensor ON and
+  // only release it after motion_timeout_ms with no new movement event (debounce).
+  void set_motion_timeout(uint32_t ms) { this->motion_timeout_ms = ms; }
+
+  void note_motion_event(uint32_t now) {
+    this->last_motion_millis = now;
+    if (!this->motion_active) {
+      this->motion_active = true;
+      this->publish_motion(true);
+    }
+  }
+
+  void tick_motion(uint32_t now) {
+    if (this->motion_active && (now - this->last_motion_millis) >= this->motion_timeout_ms) {
+      this->motion_active = false;
+      this->publish_motion(false);
+    }
+  }
+
+  void reset_motion() {
+    this->motion_active = false;
+    this->last_motion_millis = 0;
+    this->publish_motion(false);
+  }
+
   uint8_t id;
   esphome::binary_sensor::BinarySensor *presence_sensor{nullptr};
   esphome::binary_sensor::BinarySensor *motion_sensor{nullptr};
   esphome::text_sensor::TextSensor *map_sensor{nullptr};
   GridMap grid;
   uint8_t sensitivity; // 1=Low, 2=Med, 3=High
+  uint32_t motion_timeout_ms{5000};
+  uint32_t last_motion_millis{0};
+  bool motion_active{false};
 };
 
 class FP2Component;

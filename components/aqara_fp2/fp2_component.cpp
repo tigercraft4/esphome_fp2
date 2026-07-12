@@ -360,6 +360,12 @@ void FP2Component::loop() {
 
   check_initialization_();
   process_command_queue_();
+
+  // Release zone motion sensors once their debounce timeout expires.
+  uint32_t now = millis();
+  for (auto &z : zones_) {
+    z->tick_motion(now);
+  }
 }
 
 void FP2Component::check_initialization_() {
@@ -503,7 +509,7 @@ void FP2Component::check_initialization_() {
     ESP_LOGI(TAG, "Publishing initial zone states (no presence/motion after reset)");
     for (const auto &zone : zones_) {
       zone->publish_presence(false);
-      zone->publish_motion(false);
+      zone->reset_motion();
     }
 
     if (global_presence_sensor_ != nullptr) global_presence_sensor_->publish_state(false);
@@ -845,15 +851,22 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
     case AttrId::DETECT_ZONE_MOTION:
         if (payload.size() == 5 && payload[2] == 0x01) {
             uint8_t zone_id = payload[3];
-            uint8_t state = payload[4];
-            ESP_LOGD(TAG, "Zone Motion Report: Zone %u = %u", zone_id, state);
+            uint8_t event_type = payload[4];
+            ESP_LOGD(TAG, "Zone Motion Report: Zone %u = 0x%02X", zone_id, event_type);
 
-            //for (auto &z : zones_) {
-            //  if (z->id == zone_id) {
-            //    z->publish_motion(state == 1);
-            //    break;
-            //  }
-            //}
+            // Low byte is an event-type bitmask (PROTOCOL 0x0115):
+            // 1=Enter, 2=Move, 4=Exit, 8=L/R, 16=Interference.
+            // Enter/Move/L-R count as movement and refresh the debounce timer;
+            // Exit/Interference do not.
+            if (event_type & 0x0B) {
+              uint32_t now = millis();
+              for (auto &z : zones_) {
+                if (z->id == zone_id) {
+                  z->note_motion_event(now);
+                  break;
+                }
+              }
+            }
             break;
         }
         break;

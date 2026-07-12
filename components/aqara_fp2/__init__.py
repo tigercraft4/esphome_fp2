@@ -47,6 +47,7 @@ CONF_EDGE_GRID = "edge_grid"
 CONF_ZONES = "zones"
 CONF_GRID = "grid"
 CONF_SENSITIVITY = "sensitivity"
+CONF_MOTION_TIMEOUT = "motion_timeout"
 
 # New Options
 CONF_RADAR_RESET_PIN = "radar_reset_pin"
@@ -181,6 +182,7 @@ ZONE_SCHEMA = (
         {
             cv.GenerateID(CONF_ID): cv.declare_id(FP2Zone),
             cv.Required(CONF_GRID): parse_ascii_grid,
+            cv.Optional(CONF_MOTION_TIMEOUT, default="5s"): cv.positive_time_period_milliseconds,
             cv.Optional("zone_map_sensor"): text_sensor_.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
         }
     ).extend(ZONE_BASE_SCHEMA)
@@ -338,6 +340,8 @@ async def to_code(config):
                 zone_conf[CONF_PRESENCE_SENSITIVITY],
             )
             await cg.register_component(var, zone_conf)
+
+            cg.add(var.set_motion_timeout(zone_conf[CONF_MOTION_TIMEOUT].total_milliseconds))
 
             # Create sensors if provided
             for key, (new, funcName) in ZONE_SENSOR_MAP.items():
