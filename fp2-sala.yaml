@@ -21,6 +21,13 @@ wifi:
 
 captive_portal:
 
+# Local diagnostics page on the device IP (http://<device-ip>/).
+# version 2 is embedded/offline-friendly and light on the SOLO-1.
+# Add an `auth:` block if you want to password-protect it.
+web_server:
+  port: 80
+  version: 2
+
 api:
   encryption:
     key: !secret api_encryption_key
