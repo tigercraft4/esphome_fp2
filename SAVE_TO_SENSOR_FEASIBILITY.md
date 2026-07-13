@@ -184,8 +184,45 @@ milestone's plan.
 
 ## 6. Manual Follow-Up: Persistence Test Result
 
-*Not yet run — no physical device available during this spike. Update this
-section with the actual observed result before scoping `RUN-01`.*
+**Status: in progress, real device (`fp2-sala`), 2026-07-14.**
+
+- Added `fp2_read_attr`/`fp2_write_attr_uint8` raw diagnostic actions to
+  `fp2-sala.yaml` (not present before), reflashed successfully — confirmed
+  live via the HA REST API (`/api/services/esphome`) that
+  `fp2_sala_fp2_read_attr`/`fp2_sala_fp2_write_attr_uint8` now exist.
+- Attempted `fp2_read_attr(attr=0x0111)` (`PRESENCE_DETECT_SENSITIVITY`,
+  global, no zone needed) twice, via direct HA REST API calls
+  (`POST /api/services/esphome/fp2_sala_fp2_read_attr`).
+- **Result: `command_read_timeout`** both times — device log:
+  ```
+  [I][aqara_fp2:274]: Queueing raw radar read for presence_detection_sensitivity (0x0111)
+  [I][aqara_fp2:133]: command_tx_read presence_detection_sensitivity (0x0111) len=2 data=01 11
+  [I][aqara_fp2:133]: command_read_timeout presence_detection_sensitivity (0x0111) len=2 data=01 11
+  ```
+  The radar never responded to the on-demand READ within the 500ms ACK
+  window (confirmed via the `Radar Debug` text_sensor mirroring the same
+  log lines). This is a **new finding, not anticipated by the original
+  research**: unlike writes (`configure_sleep_mode`'s proven-live `ZONE_MAP`
+  writes), an ad-hoc READ of an arbitrary attribute may not be reliably
+  answered by the radar outside whatever specific contexts the firmware
+  expects reads in (e.g. only right after a corresponding WRITE, or only for
+  attributes actively being polled elsewhere).
+- **Implication for `RUN-01`:** if reads are unreliable in general (not just
+  for this one SubID), the "did my write actually take effect" verification
+  loop `RUN-01` needs (Risk 2's success/failure feedback) cannot rely on a
+  simple read-back — it may need to lean on ACK-of-the-WRITE alone as the
+  only success signal, or investigate why reads time out (wrong attribute,
+  wrong read opcode, radar-side gating) before committing to a design.
+- **Not yet attempted:** the WRITE side of this test
+  (`fp2_write_attr_uint8(attr=0x0111, value=3)`) and the actual power-cycle
+  persistence check — write mechanics were already proven separately via
+  `configure_sleep_mode`, so this specific spike's remaining open item is
+  now **"why do ad-hoc reads time out"**, not just "does a write persist."
+- **Next steps (carried to a fresh session):** (1) retry `fp2_read_attr` a
+  few more times / on a different attribute to rule out a transient issue
+  vs. a structural one; (2) try the WRITE step and confirm its ACK succeeds
+  (expected, per precedent); (3) if reads remain unreliable, treat that as
+  its own open question in `RUN-01`'s scoping, separate from persistence.
 
 ## 7. Risks
 

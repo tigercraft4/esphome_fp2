@@ -66,6 +66,19 @@ api:
       then:
         - lambda: |-
             id(fp2).reset_radar();
+    - action: fp2_read_attr
+      variables:
+        attr: int
+      then:
+        - lambda: |-
+            id(fp2).read_attr((uint16_t) attr);
+    - action: fp2_write_attr_uint8
+      variables:
+        attr: int
+        value: int
+      then:
+        - lambda: |-
+            id(fp2).write_attr_uint8((uint16_t) attr, (uint8_t) value);
 
 ota:
   - platform: esphome
