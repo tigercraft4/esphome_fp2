@@ -163,14 +163,21 @@ physical access to a `fp2-sala`-class device to run and record the result.
    sequence (rebuilding the activation list).
 
 **What "conditional" means:**
-1. **Persistence is unknown** and can only be resolved by the manual test in
-   §4. If registers turn out to be volatile, `RUN-01` needs an additional
-   shadow-copy/re-apply layer to survive radar-only resets — meaningfully
-   more scope than a simple write-and-forget action.
-2. **No atomic commit / no rollback** in the existing command queue means
-   `RUN-01` must build its own success/failure feedback loop back to the
-   card UI — real engineering work with no existing precedent to lean on
-   (every existing action is fire-and-forget with no response payload).
+1. **Persistence is unknown, and — per §6's manual test results — currently
+   unanswerable.** Neither `fp2_read_attr` (radar never answers a
+   host-initiated read) nor `get_map_config` (never queries the radar; it
+   just echoes the compiled YAML) can confirm what value is actually live
+   on the device, before or after a reboot. If registers turn out to be
+   volatile, `RUN-01` needs an additional shadow-copy/re-apply layer to
+   survive radar-only resets — meaningfully more scope than a simple
+   write-and-forget action. Resolving this needs either a firmware-side fix
+   to the read path or a fallback to indirect behavioral verification.
+2. **No atomic commit / no rollback / no read-back** in the existing
+   command queue means `RUN-01` must build its own success/failure feedback
+   loop back to the card UI relying on ACK-of-write alone (confirmed the
+   only reliable signal in §6) — real engineering work with no existing
+   precedent to lean on (every existing action is fire-and-forget with no
+   response payload, and reads don't work).
 3. **Adding/removing a zone live is meaningfully riskier** than editing an
    existing one, since it requires new live-side zone-ID bookkeeping this
    codebase doesn't have today (`zones_` is populated once, at compile time,
@@ -213,16 +220,93 @@ milestone's plan.
   simple read-back — it may need to lean on ACK-of-the-WRITE alone as the
   only success signal, or investigate why reads time out (wrong attribute,
   wrong read opcode, radar-side gating) before committing to a design.
-- **Not yet attempted:** the WRITE side of this test
-  (`fp2_write_attr_uint8(attr=0x0111, value=3)`) and the actual power-cycle
-  persistence check — write mechanics were already proven separately via
-  `configure_sleep_mode`, so this specific spike's remaining open item is
-  now **"why do ad-hoc reads time out"**, not just "does a write persist."
-- **Next steps (carried to a fresh session):** (1) retry `fp2_read_attr` a
-  few more times / on a different attribute to rule out a transient issue
-  vs. a structural one; (2) try the WRITE step and confirm its ACK succeeds
-  (expected, per precedent); (3) if reads remain unreliable, treat that as
-  its own open question in `RUN-01`'s scoping, separate from persistence.
+- **Follow-up round, same day, three more tests:**
+  1. `fp2_read_attr(attr=0x0102)` — `RADAR_SW_VERSION`, an attribute the
+     radar reports unprompted at boot (i.e. known-good, not some obscure
+     SubID). **Result: `command_read_timeout` again.** Rules out "0x0111
+     specifically is unsupported" — the timeout is structural, not
+     attribute-specific.
+  2. `fp2_write_attr_uint8(attr=0x0111, value=3)` (bump
+     `PRESENCE_DETECT_SENSITIVITY` from compiled `medium`/2 to `high`/3).
+     **Result: `command_ack`, len=0 — succeeded immediately**, consistent
+     with `configure_sleep_mode`'s proven-live write path. Writes work;
+     reads don't.
+  3. `fp2_read_attr(attr=0x0111)` immediately after that write, to test
+     whether a read only succeeds in the narrow window right after writing
+     the same attribute. **Result: `command_read_timeout` again.** Rules
+     that theory out too.
+  - **Conclusion: on-demand reads of arbitrary attributes do not work on
+    this firmware, full stop** — not a transient issue, not
+    attribute-specific, not write-then-read timing. The host-side
+    READ/RESPONSE bookkeeping was traced in `fp2_component.cpp` (queues a
+    `waiting_for_response_attr_id_`, matches it against incoming
+    `OpCode::RESPONSE` frames at the point they arrive) and is implemented
+    correctly — the radar itself simply never emits a `RESPONSE` frame for
+    a host-initiated read.
+  - **Cross-check against the independent reverse-engineering reference**
+    ([hansihe/AqaraPresenceSensorFP2ReverseEngineering](https://github.com/hansihe/AqaraPresenceSensorFP2ReverseEngineering),
+    `PROTOCOL.md`) complicates this. Its §6 attribute table — derived from
+    static disassembly of the firmware's `radar_attribute_table` /
+    `subCommandWithOperationValidityTable` — lists **both tested SubIDs as
+    `RW`**: `0x0102` (`sw_version`, "R") and `0x0111`
+    (`presence_det_sens`, "RW"), where "R" is explicitly defined as
+    "Read(4)/Resp(1)" being a permitted operation. If that table is
+    accurate, the firmware's own permission check should accept a
+    host-initiated `0x04` Read for both attributes — it isn't a
+    write-only/read-only-by-design attribute rejecting the request.
+    `READ_TIMEOUT_MS` is also 500ms, identical to `ACK_TIMEOUT_MS`, which
+    comfortably covers WRITE acks in practice — so the failure isn't an
+    under-provisioned timeout window either. This is now an **open,
+    unresolved discrepancy** rather than a settled "protocol doesn't
+    support host reads" conclusion: either this specific unit's firmware
+    revision (`radar_sw_version` reads as `99` in the `sw_version` sensor
+    state) behaves differently from the one that reference table was
+    reverse-engineered from, there's an undocumented precondition the
+    radar requires before it will answer a Read (a specific prior
+    sequence, a mode flag, a queue-state requirement), or there's a subtle
+    framing mismatch between what this component sends and what the
+    firmware's read handler expects that a permission-table read doesn't
+    capture. The same reference (§2.2) also documents a **reverse query
+    mechanism** — for `device_direction` (`0x0143`) and
+    `angle_sensor_data` (`0x0120`), the *radar* queries the *host*
+    (`OpCode 0x01`, matching this component's own
+    `send_reverse_response_()` at `fp2_component.cpp:669`) — confirming
+    that direction of the exchange works as implemented, but that's the
+    opposite direction from what `fp2_read_attr` needs. Not a firmware/host
+    bug conclusion either way yet — flagged as unresolved, not root-caused.
+- **Second, more consequential finding: `get_map_config` cannot be used as
+  a read-back oracle at all.** Tracing `FP2Component::get_map_config_json()`
+  (`fp2_component.cpp:1494`) shows it deserializes `this->map_config_json_`
+  — a string built once from the **compile-time YAML config** — and returns
+  it verbatim, with a comment noting runtime data could be layered in "in
+  the future" but isn't today. It never issues a live read of the radar.
+  This means **the entire §4 test procedure as written is invalid**: step 3
+  ("read back before reboot via `get_map_config`, confirm it reads `3`")
+  can never succeed, because `get_map_config` will always echo the
+  compiled `medium`/2 default regardless of what was actually written live
+  to the radar moments earlier.
+- **Net effect:** there is currently **no working read-back path** for
+  live register state on this firmware — not via ad-hoc `fp2_read_attr`
+  (radar doesn't respond), not via `get_map_config` (never asks the radar
+  in the first place). The reboot-persistence question from §4 is not just
+  unexecuted, it's **currently unanswerable** with existing tooling. The
+  only remaining way to observe whether a live write "stuck" — before or
+  after a reboot — is indirect behavioral inference (e.g. does the radar's
+  actual motion sensitivity visibly change), not a protocol-level check.
+- **Next steps (carried to a fresh session):** (1) decide whether to invest
+  in figuring out why the radar won't answer host-initiated reads (may
+  require re-examining the reverse-read mechanism at
+  `send_reverse_response_()` / `fp2_component.cpp:669` — the protocol may
+  only support the *radar* initiating reads *of the host*, never the
+  reverse); (2) if reads stay unfixable, `RUN-01`'s success/failure
+  feedback loop (Risk 2) must rely on ACK-of-write alone, and any
+  persistence check must be behavioral, not protocol-level; (3) the live
+  test write from this session (`0x0111` → `3`, high sensitivity) was
+  reverted back to the compiled `medium`/2 default (`command_ack`
+  confirmed) before ending the session, out of caution — not because
+  leaving it would have broken anything (a reboot would have overwritten it
+  back via `check_initialization_()` regardless, per §2's compiled re-push
+  behavior).
 
 ## 7. Risks
 
