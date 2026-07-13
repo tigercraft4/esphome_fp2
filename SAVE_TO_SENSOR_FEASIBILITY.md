@@ -1,0 +1,294 @@
+# Save-to-Sensor Feasibility Spike
+
+**Status:** Investigation only — no feature shipped by this document.
+**Date:** 2026-07-13
+**Scope:** SPK-01 — assess whether a runtime "Save to Sensor" write path (pushing
+an edited zone/grid config to the FP2 device live, without a reflash) is
+feasible, to inform scoping of the deferred `RUN-01` requirement in a future
+milestone.
+**Recommendation:** **Conditional GO** — gated on a manual reboot-persistence
+test (§4). See §5 for the full recommendation and reasoning.
+
+---
+
+## 1. Summary
+
+The mechanism to write a zone's configuration to the FP2 radar at runtime
+**already exists and is already proven live** in this codebase, just not
+exposed as a dedicated "save this zone" action. `enqueue_command_blob2_()` —
+the function that writes `ZONE_MAP` (0x0114), the core per-zone grid
+register — is already called on-demand, post-boot, by the existing
+`fp2_configure_sleep_mode` Home Assistant action (`configure_sleep_mode()` in
+`fp2_component.cpp:306-325`). This is direct, shipped proof that writing this
+register outside the boot-time-only path works correctly.
+
+What's genuinely unresolved is **persistence**: does a runtime-written
+register survive the radar module's own internal reset? No comment, constant,
+or protocol note anywhere in this codebase indicates either way — this is a
+hardware-observable fact, not something more code-reading can determine. A
+step-by-step test procedure to answer it is given in §4, to be run manually
+against a real `fp2-sala` device.
+
+## 2. The Zone Bring-Up Sequence (5 Interdependent Registers)
+
+**Correction to this spike's original framing:** the 5-register zone sequence
+does **not** live in `force_detection_config()`. It lives in
+`check_initialization_()` (`fp2_component.cpp:448-479`), a method gated by an
+`init_done_` flag (`fp2_component.h:438`) that runs **exactly once per boot
+cycle**, the first time UART traffic arrives from the radar after a reset
+(`fp2_component.cpp:382-388`). `force_detection_config()`
+(`fp2_component.cpp:203-226`) is a separate, already-exposed action that
+re-sends *global* detection settings and never touches any zone register.
+
+The five registers, defined in `fp2_component.h:148, 183-189`:
+
+| Register | SubID | Shape | Scope |
+|----------|-------|-------|-------|
+| `ZONE_MAP` | `0x0114` | `[ZoneID(1)] [Grid(40)]`, BLOB2 | Per zone |
+| `ZONE_SENSITIVITY` | `0x0151` | `UINT16 (High=ID, Low=Sens)` | Per zone |
+| `DETECT_ZONE_TYPE` | `0x0152` | `UINT16 (High=ID, Low=Type)`, optional | Per zone |
+| `ZONE_ACTIVATION_LIST` | `0x0202` | 32-byte array, BLOB2 | **Global, not per-zone** |
+| `ZONE_CLOSE_AWAY_ENABLE` | `0x0153` | `UINT16 (High=ID, Low=1)` | Per zone |
+
+**Observed order** (from `check_initialization_()`, per zone in `zones_`):
+`ZONE_MAP` → `ZONE_SENSITIVITY` → `DETECT_ZONE_TYPE` (if set) → *(after all
+zones)* → `ZONE_ACTIVATION_LIST` → *(separate loop)* → `ZONE_CLOSE_AWAY_ENABLE`
+for each zone. Whether this order is protocol-mandated or incidental to how
+it was originally reverse-engineered is not determinable from this codebase —
+treat it as the safe default to replicate; do not reorder without a live test.
+
+**Can a single zone be updated without touching the others?** Yes, for
+`ZONE_MAP`/`ZONE_SENSITIVITY`/`DETECT_ZONE_TYPE`/`ZONE_CLOSE_AWAY_ENABLE` —
+all four are addressed per-zone by ID. `ZONE_ACTIVATION_LIST` is the
+exception: it's a single global 32-byte array (one byte per possible zone ID),
+rebuilt by iterating every configured zone. Editing an *existing* zone's
+grid/sensitivity/type therefore should not require resending the activation
+list; adding or removing a zone (changing which IDs are active) would require
+rebuilding and resending the full array, since this protocol has no
+incremental "activate zone N" command. This inference is structural, not
+tested against real firmware — validate it during the manual test (§4).
+
+## 3. Write Mechanics — `enqueue_command_blob2_()`
+
+Traced end-to-end (`fp2_component.cpp:1361-1380`, `542-651`, `594-633`):
+
+- **Queued, not synchronous.** `enqueue_command_blob2_()` appends to
+  `command_queue_` (a `std::deque`) and returns immediately. Sending happens
+  in `process_command_queue_()`, called every `loop()` tick.
+- **Strict FIFO, one in-flight command, ACK-gated.** No second command sends
+  while `waiting_for_ack_attr_id_` is set. Timeout `500ms`, `3` retries; after
+  that the command is dropped and logged as `command_ack_failed` in
+  `radar_debug`.
+- **No atomic commit across a multi-register sequence.** Each command is
+  independent. If one drops mid-sequence (e.g. a concurrent
+  `fp2_reset_radar` call clears the queue), the zone can end up with a new
+  grid but stale sensitivity, or — for a newly-added zone — not yet in the
+  activation list at all.
+- **Framing is uniform.** `[0x55 Sync][Ver][Seq][OpCode][Len][HeaderChecksum][Payload][CRC16]`
+  — identical for every command type; BLOB2 gets a `0x06` DataType byte + 2-byte
+  length prefix inside the payload, nothing more.
+- **Timing.** Best case (prompt ACKs): well under 100ms for a full 5-register,
+  single-zone sequence at 890000 baud. Worst case (every command times out and
+  exhausts retries): up to `5 × 3 × 500ms ≈ 7.5s`.
+
+**Would calling this twice in one boot cycle cause a problem?** Existing
+precedent says no — `configure_sleep_mode()` already does exactly this today,
+live: it calls `enqueue_command_blob2_(ZONE_MAP, empty_zone)` **twice**
+(bracketing a `WORK_MODE` change), and is itself invoked on-demand, post-boot,
+via the shipped `fp2_configure_sleep_mode` HA action
+(`fp2-sala.yaml:47-54`, `example_config.yaml:83-90`). This is the strongest
+piece of evidence in this spike: the exact write primitive `RUN-01` would need
+is already exercised in production, outside boot-time context, without any
+documented issue.
+
+## 4. Reboot-Persistence Test (not executed — manual follow-up)
+
+**No physical FP2 device exists in this development environment.** This
+question — does a written register survive the radar module's own reset —
+cannot be answered from source code alone; it requires observing actual
+hardware behavior. The following procedure is written for whoever has
+physical access to a `fp2-sala`-class device to run and record the result.
+
+1. **Baseline.** Call `get_map_config` (via HA Developer Tools → Actions, or
+   the card's "Import from Device" button) and record the current `zones`
+   array (`sensitivity`, `grid` hex per zone).
+2. **Apply a distinguishable test write.** Using the raw diagnostic actions
+   already shipped in `example_config.yaml` (`fp2_write_attr_uint16`), write a
+   `ZONE_SENSITIVITY` value to an existing zone that differs from its
+   compiled default (e.g. if zone 1 compiles as `medium` (`2`), write `high`
+   (`3`) via `fp2_write_attr_uint16(attr=0x0151, value=(1<<8)|3)`).
+   Sensitivity is the simplest register to test (a single UINT16, not a
+   41-byte blob).
+3. **Read back before reboot.** Call `get_map_config` again; confirm the
+   value reads back as `3`. This proves the write was accepted at the
+   protocol level — necessary but not sufficient for persistence.
+4. **Power-cycle the FP2 device.** Use a **true power-cycle** (unplug/replug
+   the whole unit), not just `fp2_reset_radar`'s GPIO pulse — that path only
+   resets the radar module and will be immediately followed by ESPHome's own
+   `check_initialization_()` re-pushing the *compiled* config, which would
+   mask the result either way.
+   - **Important caveat:** `check_initialization_()` runs on **every** boot,
+     unconditionally, and re-pushes the compiled-in value regardless of what
+     the radar remembers. To get a clean read of radar-side persistence, do
+     the read-back (step 5) in the narrow window after the radar resumes
+     traffic but you must confirm via `radar_debug` logs whether
+     `check_initialization_()` has already re-fired and overwritten your test
+     value before you read it, or the test result is inconclusive.
+5. **Read back after reboot** via `get_map_config`. If it reads `3` before
+   `check_initialization_()` visibly re-runs (confirm via `radar_debug`
+   timestamps), that's a positive persistence signal. If it reads `2`
+   (the compiled default), either the radar's own storage is volatile, or
+   ESPHome's boot-time re-push already happened — check `radar_debug` to
+   disambiguate which.
+6. **Optional: check the activation list.** If you also test adding/removing
+   a zone, read back `ZONE_ACTIVATION_LIST` (`fp2_read_attr(attr=0x0202)`,
+   already shipped) to confirm §2's inference that it's a separate,
+   wholesale-array register.
+7. **Record the result** — update this document's §6 with the outcome before
+   scoping `RUN-01`.
+
+## 5. Go/No-Go Recommendation
+
+**CONDITIONAL GO.**
+
+**Reasons to proceed:**
+1. The write primitive is already proven live in production
+   (`configure_sleep_mode`, shipped as `fp2_configure_sleep_mode`) — not new,
+   risky ground.
+2. The transport pattern (ESPHome native `api: actions:` → `FP2Component`
+   method) is proven by five existing actions, requires no new architecture,
+   no MQTT, and no firmware framework changes.
+3. Editing an *existing, already-compiled* zone — the most valuable and
+   lowest-risk slice of `RUN-01` — doesn't need the riskiest part of the
+   sequence (rebuilding the activation list).
+
+**What "conditional" means:**
+1. **Persistence is unknown** and can only be resolved by the manual test in
+   §4. If registers turn out to be volatile, `RUN-01` needs an additional
+   shadow-copy/re-apply layer to survive radar-only resets — meaningfully
+   more scope than a simple write-and-forget action.
+2. **No atomic commit / no rollback** in the existing command queue means
+   `RUN-01` must build its own success/failure feedback loop back to the
+   card UI — real engineering work with no existing precedent to lean on
+   (every existing action is fire-and-forget with no response payload).
+3. **Adding/removing a zone live is meaningfully riskier** than editing an
+   existing one, since it requires new live-side zone-ID bookkeeping this
+   codebase doesn't have today (`zones_` is populated once, at compile time,
+   and never mutated at runtime).
+
+**Recommended `RUN-01` scoping:** start with "edit an existing compiled
+zone's grid/sensitivity/type live," explicitly deferring "add/remove a zone
+live" to a later increment. Require the §4 persistence test to be run and
+its result recorded here before committing engineering time to that
+milestone's plan.
+
+## 6. Manual Follow-Up: Persistence Test Result
+
+*Not yet run — no physical device available during this spike. Update this
+section with the actual observed result before scoping `RUN-01`.*
+
+## 7. Risks
+
+| # | Risk | Why it happens | Mitigation / what to watch for |
+|---|------|-----------------|----------------------------------|
+| 1 | Writing while the radar is mid-detection-cycle | No documented "pause detection" / "begin transaction" primitive in the protocol | No static mitigation identified — watch for stale/corrupted zone-presence reports immediately after a live write during the manual test |
+| 2 | No atomic commit — partial-write inconsistency if UART drops mid-sequence or a concurrent `fp2_reset_radar` clears the queue | `command_queue_` is a flat FIFO with per-command ACK/retry, no transaction grouping; `perform_reset_()` unconditionally clears the queue | A real implementation should track "sequence in progress" state, block concurrent resets while pending, and verify all ACKs before reporting success to the UI |
+| 3 | Live write vs. the next boot-time re-push drifting out of sync | `check_initialization_()` always re-pushes the *compiled* config on every boot, with no concept of "a live override exists" | Treat a runtime save as ephemeral unless the user also re-exports and reflashes the updated YAML — document clearly so a "saved" zone reverting after reboot doesn't surprise users |
+| 4 | Adding/removing a zone live is riskier than editing one | Requires rebuilding + resending the 32-byte activation list, which needs a live zone-ID registry that doesn't exist today | Scope `RUN-01` v1 to edit-only; defer live add/remove |
+
+## 8. Illustrative Transport Design Sketch
+
+**Not a working PR — untested, unregistered, omits error handling.** Shown to
+give a future `RUN-01` a concrete starting point, following the exact pattern
+of `fp2_force_detection_config`/`fp2_configure_sleep_mode`.
+
+### ESPHome YAML action entry
+
+```yaml
+# ILLUSTRATIVE — not implemented, not registered.
+- action: fp2_save_zone_to_sensor
+  variables:
+    zone_id: int
+    grid_hex: string        # 80 hex chars = 40 bytes, same format get_map_config returns
+    sensitivity: int         # 1=low, 2=medium, 3=high
+    zone_type: int           # optional; -1 sentinel for "not set"
+  then:
+    - lambda: |-
+        id(fp2).save_zone_to_sensor((uint8_t) zone_id, grid_hex,
+                                     (uint8_t) sensitivity, zone_type);
+```
+
+### `FP2Component` method sketch
+
+```cpp
+// ILLUSTRATIVE — not implemented.
+void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_hex,
+                                        uint8_t sensitivity, int zone_type) {
+  if (grid_hex.size() != 80) {
+    ESP_LOGE(TAG, "save_zone_to_sensor: grid_hex must be 80 hex chars, got %u",
+             (unsigned) grid_hex.size());
+    return;
+  }
+  std::vector<uint8_t> grid(40);
+  for (int i = 0; i < 40; i++) {
+    grid[i] = (uint8_t) strtol(grid_hex.substr(i * 2, 2).c_str(), nullptr, 16);
+  }
+
+  std::vector<uint8_t> payload;
+  payload.push_back(zone_id);
+  payload.insert(payload.end(), grid.begin(), grid.end());
+  enqueue_command_blob2_(AttrId::ZONE_MAP, payload);
+
+  uint16_t sens_val = (zone_id << 8) | (sensitivity & 0xFF);
+  enqueue_command_(OpCode::WRITE, AttrId::ZONE_SENSITIVITY, sens_val);
+
+  if (zone_type >= 0) {
+    uint16_t type_val = (zone_id << 8) | ((uint8_t) zone_type & 0xFF);
+    enqueue_command_(OpCode::WRITE, AttrId::DETECT_ZONE_TYPE, type_val);
+  }
+
+  enqueue_command_(OpCode::WRITE, AttrId::ZONE_CLOSE_AWAY_ENABLE, (uint16_t)((zone_id << 8) | 1));
+
+  // ZONE_ACTIVATION_LIST is intentionally NOT resent here — editing an existing
+  // zone shouldn't need it (see §2). A real implementation needs a live-side
+  // zone registry to know when a write is an addition (requiring a rebuild)
+  // vs. an edit (not requiring one) — zones_ today is compile-time only.
+  ESP_LOGW(TAG, "save_zone_to_sensor is illustrative; live zone-addition "
+                "bookkeeping is not implemented.");
+}
+```
+
+### `card.js` call-site sketch
+
+```javascript
+// ILLUSTRATIVE — not implemented.
+async function saveZoneToSensor(hass, deviceName, zoneId, gridHex, sensitivity, zoneType) {
+  const service = `${deviceName}_fp2_save_zone_to_sensor`;
+  await hass.callService('esphome', service, {
+    zone_id: zoneId,
+    grid_hex: gridHex,          // same hex string gridToAscii/asciiToGrid already produce
+    sensitivity: sensitivity,
+    zone_type: zoneType ?? -1,
+  }, undefined, undefined, true);
+}
+```
+
+This reuses 100% of the existing grid-serialization work from Phases 1-4 on
+the card side — no new codec needed.
+
+### Security notes for a real implementation
+
+A real `save_zone_to_sensor()` writes directly to hardware from
+runtime-supplied input, unlike the existing compile-time-only path (which
+trusts YAML). It must validate `zone_id` is in range (`0-31`, matching the
+32-byte activation list), and `sensitivity`/`zone_type` are within their enum
+ranges, before building a UART frame — the illustrative sketch above only
+checks `grid_hex`'s length. No new authentication boundary is introduced; the
+action would ride the same encrypted ESPHome native API as every other
+existing `fp2_*` action.
+
+---
+
+*This document is the SPK-01 deliverable for the Aqara FP2 Zone Editor
+milestone. See `.planning/phases/06-spike-save-to-sensor-feasibility/` for
+the full research trail this report was synthesized from.*

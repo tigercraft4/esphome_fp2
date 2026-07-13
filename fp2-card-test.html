@@ -84,6 +84,175 @@
                 content: "⚙️";
                 font-size: 20px;
             }
+
+            /* Round-trip results panel (D-03) */
+            #fp2-roundtrip-panel {
+                background: white;
+                padding: 20px;
+                margin-bottom: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                font-family: monospace;
+            }
+
+            #fp2-roundtrip-panel h2 {
+                margin-top: 0;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+            }
+
+            #fp2-roundtrip-panel .fp2-result-row {
+                padding: 4px 8px;
+                border-radius: 4px;
+                margin-bottom: 2px;
+            }
+
+            #fp2-roundtrip-panel .fp2-result-pass {
+                background: #d4edda;
+                color: #155724;
+            }
+
+            #fp2-roundtrip-panel .fp2-result-fail {
+                background: #f8d7da;
+                color: #721c24;
+            }
+
+            #fp2-roundtrip-panel .fp2-result-summary {
+                margin-top: 10px;
+                font-weight: bold;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+            }
+
+            /* Editor-mode results panel (Phase 2, EDIT-01..04) — mirrors
+               #fp2-roundtrip-panel styling exactly. */
+            #fp2-editor-panel {
+                background: white;
+                padding: 20px;
+                margin-bottom: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                font-family: monospace;
+            }
+
+            #fp2-editor-panel h2 {
+                margin-top: 0;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+            }
+
+            #fp2-editor-panel .fp2-result-row {
+                padding: 4px 8px;
+                border-radius: 4px;
+                margin-bottom: 2px;
+            }
+
+            #fp2-editor-panel .fp2-result-pass {
+                background: #d4edda;
+                color: #155724;
+            }
+
+            #fp2-editor-panel .fp2-result-fail {
+                background: #f8d7da;
+                color: #721c24;
+            }
+
+            #fp2-editor-panel .fp2-result-summary {
+                margin-top: 10px;
+                font-weight: bold;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+            }
+
+            /* Export & Zone Controls results panel (Phase 4, ZONE-01..03/
+               EXP-01..03/VAL-01) — mirrors #fp2-roundtrip-panel/
+               #fp2-editor-panel styling exactly. */
+            #fp2-export-panel {
+                background: white;
+                padding: 20px;
+                margin-bottom: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                font-family: monospace;
+            }
+
+            #fp2-export-panel h2 {
+                margin-top: 0;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+            }
+
+            #fp2-export-panel .fp2-result-row {
+                padding: 4px 8px;
+                border-radius: 4px;
+                margin-bottom: 2px;
+            }
+
+            #fp2-export-panel .fp2-result-pass {
+                background: #d4edda;
+                color: #155724;
+            }
+
+            #fp2-export-panel .fp2-result-fail {
+                background: #f8d7da;
+                color: #721c24;
+            }
+
+            #fp2-export-panel .fp2-result-summary {
+                margin-top: 10px;
+                font-weight: bold;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+            }
+
+            /* Import results panel (Phase 5, IMP-01/IMP-02) — mirrors
+               #fp2-export-panel styling exactly (same class names, scoped
+               under the new id). */
+            #fp2-import-panel {
+                background: white;
+                padding: 20px;
+                margin-bottom: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                font-family: monospace;
+            }
+
+            #fp2-import-panel h2 {
+                margin-top: 0;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+            }
+
+            #fp2-import-panel .fp2-result-row {
+                padding: 4px 8px;
+                border-radius: 4px;
+                margin-bottom: 2px;
+            }
+
+            #fp2-import-panel .fp2-result-pass {
+                background: #d4edda;
+                color: #155724;
+            }
+
+            #fp2-import-panel .fp2-result-fail {
+                background: #f8d7da;
+                color: #721c24;
+            }
+
+            #fp2-import-panel .fp2-result-summary {
+                margin-top: 10px;
+                font-weight: bold;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+            }
         </style>
     </head>
     <body>
@@ -130,6 +299,51 @@
             </div>
 
             <aqara-fp2-card id="test-card"></aqara-fp2-card>
+
+            <div id="fp2-roundtrip-panel">
+                <h2>Codec Round-Trip Results</h2>
+                <div id="fp2-roundtrip-rows">
+                    <div class="fp2-result-row">
+                        Waiting for card.js to load…
+                    </div>
+                </div>
+            </div>
+
+            <div id="fp2-editor-panel">
+                <h2>Editor Mode Results (Phase 2)</h2>
+                <div id="fp2-editor-rows">
+                    <div class="fp2-result-row">
+                        Waiting for card.js to load…
+                    </div>
+                </div>
+            </div>
+
+            <div id="fp2-painting-panel">
+                <h2>Painting &amp; Geometry Results (Phase 3)</h2>
+                <div id="fp2-painting-rows">
+                    <div class="fp2-result-row">
+                        Waiting for card.js to load…
+                    </div>
+                </div>
+            </div>
+
+            <div id="fp2-export-panel">
+                <h2>Export &amp; Zone Controls Results (Phase 4)</h2>
+                <div id="fp2-export-rows">
+                    <div class="fp2-result-row">
+                        Waiting for card.js to load…
+                    </div>
+                </div>
+            </div>
+
+            <div id="fp2-import-panel">
+                <h2>Import Results (Phase 5)</h2>
+                <div id="fp2-import-rows">
+                    <div class="fp2-result-row">
+                        Waiting for card.js to load…
+                    </div>
+                </div>
+            </div>
         </div>
 
         <script>
@@ -307,13 +521,124 @@
                 };
             }
 
+            // Fixture response for the live `get_map_config` action.
+            // Matches the firmware's actual wire shape (json_get_map_data /
+            // grid_to_hex_card_format, fp2_component.cpp): mounting_position is a
+            // STRING enum, left_right_reverse is a boolean, and each grid is a
+            // 56-char (28-byte / 14-row) hex string — NOT the 80-char/20-row
+            // parse_ascii_grid format used by the round-trip fixtures below (D-05/D-06).
+            // A few cells are set (not all-zero) so the static overlays render visibly
+            // populated once the codec decodes this fixture (D-07, GRID-01).
+            const FIXTURE_MAP_CONFIG = {
+                mounting_position: "left_upper_corner",
+                left_right_reverse: false,
+                // Interference source near (row 10, col 10): out_c = 10+2=12,
+                // bit_mask = 1 << (15-12) = 0x0008 -> row 10 = "0008", rest zero.
+                interference_grid:
+                    "0000".repeat(10) + "0008" + "0000".repeat(3),
+                // Entry/exit marker near (row 1, col 7): out_c = 7+2=9,
+                // bit_mask = 1 << (15-9) = 0x0040 -> row 1 = "0040", rest zero.
+                exit_grid: "0000".repeat(1) + "0040" + "0000".repeat(12),
+                // Edge cells along the border (row 0, col 0): out_c = 0+2=2,
+                // bit_mask = 1 << (15-2) = 0x2000 -> row 0 = "2000", rest zero.
+                edge_grid: "2000" + "0000".repeat(13),
+                zones: [
+                    {
+                        sensitivity: 2,
+                        // Zone cell at (row 3, col 3): out_c = 3+2=5,
+                        // bit_mask = 1 << (15-5) = 0x0400 -> row 3 = "0400".
+                        grid: "0000".repeat(3) + "0400" + "0000".repeat(10),
+                        presence_sensor: "zone_1_presence",
+                    },
+                    {
+                        // Deliberately high(3), NOT 2, so this zone's
+                        // sensitivity is DISTINCT from zone[0]'s (medium=2) —
+                        // proves ZONE-02's seeding reads the live
+                        // `sensitivity` int per-zone rather than coincidentally
+                        // landing on "medium" for every zone (04-VALIDATION.md
+                        // Wave 0 gap).
+                        sensitivity: 3,
+                        // Zone cell at (row 8, col 8): out_c = 8+2=10,
+                        // bit_mask = 1 << (15-10) = 0x0020 -> row 8 = "0020".
+                        grid: "0000".repeat(8) + "0020" + "0000".repeat(5),
+                        // Deliberately NO presence_sensor: per 02-RESEARCH.md
+                        // Pitfall 4, real devices never emit this field
+                        // (to_code() only serializes {sensitivity, grid}) — this
+                        // is the PRIMARY production shape, not a rare edge case,
+                        // and exercises the "Zone N" (1-indexed) label fallback.
+                    },
+                ],
+            };
+
+            // SECOND, distinct fixture for the Import suite (Phase 5, Wave 0
+            // requirement / 05-VALIDATION.md invariants 2-7). Deliberately
+            // DIFFERENT interference/exit/edge grid cells and per-zone
+            // sensitivity from FIXTURE_MAP_CONFIG above, AND exactly ONE
+            // zone (FIXTURE has two) — re-assigning the SAME fixture back
+            // into card.mapConfig would make an "overwrite" indistinguishable
+            // from a no-op, and only a fixture with a different zone count
+            // can exercise the deletion-reconciliation path (Pitfall 1):
+            // importing this fixture over a FIXTURE-seeded editorState must
+            // delete `zone:1`; importing FIXTURE over an
+            // IMPORT_FIXTURE-seeded editorState must add it back. No
+            // `global_zone`/`zone_type`/`motion_timeout` key is present —
+            // the live get_map_config JSON never contains them (that gap is
+            // the whole reason IMP-02 exists).
+            const IMPORT_FIXTURE_MAP_CONFIG = {
+                mounting_position: "left_upper_corner",
+                left_right_reverse: false,
+                // Interference source near (row 5, col 5): out_c = 5+2=7,
+                // bit_mask = 1 << (15-7) = 0x0100 -> row 5 = "0100", rest zero.
+                // (FIXTURE's interference cell is at row 10/col 10 — distinct.)
+                interference_grid:
+                    "0000".repeat(5) + "0100" + "0000".repeat(8),
+                // Entry/exit marker near (row 12, col 2): out_c = 2+2=4,
+                // bit_mask = 1 << (15-4) = 0x0800 -> row 12 = "0800", rest
+                // zero. (FIXTURE's exit cell is at row 1/col 7 — distinct.)
+                exit_grid: "0000".repeat(12) + "0800" + "0000".repeat(1),
+                // Edge cell near (row 13, col 13): out_c = 13+2=15,
+                // bit_mask = 1 << (15-15) = 0x0001 -> row 13 = "0001", rest
+                // zero. (FIXTURE's edge cell is at row 0/col 0 — distinct.)
+                edge_grid: "0000".repeat(13) + "0001",
+                zones: [
+                    {
+                        // Deliberately low(1), DISTINCT from both of
+                        // FIXTURE's zone sensitivities (2 and 3) — proves a
+                        // merge overwrites presenceSensitivity rather than
+                        // coincidentally landing on a value FIXTURE also
+                        // produces.
+                        sensitivity: 1,
+                        // Zone cell at (row 6, col 6): out_c = 6+2=8,
+                        // bit_mask = 1 << (15-8) = 0x0080 -> row 6 = "0080".
+                        // (FIXTURE's zone[0] cell is at row 3/col 3 — distinct.)
+                        grid: "0000".repeat(6) + "0080" + "0000".repeat(7),
+                        // No presence_sensor: matches the primary production
+                        // shape (02-RESEARCH.md Pitfall 4 — to_code() only
+                        // serializes {sensitivity, grid}).
+                    },
+                ],
+            };
+
             // Mock Home Assistant object
             const mockHass = {
                 states: mockHassStates,
                 devices: mockHassDevices,
                 entities: mockHassEntities,
-                callService: function (domain, service, data) {
+                callService: function (
+                    domain,
+                    service,
+                    data,
+                    target,
+                    notifyOnError,
+                    returnResponse,
+                ) {
                     console.log("Mock service call:", domain, service, data);
+                    if (service.endsWith("_get_map_config") && returnResponse) {
+                        return Promise.resolve({
+                            response: FIXTURE_MAP_CONFIG,
+                        });
+                    }
+                    return Promise.resolve({});
                 },
             };
 
@@ -366,6 +691,117 @@
                 updateCard();
             }
 
+            // Test utility (Wave 0, EDIT-04/D-05): temporarily stub
+            // window.confirm so the Clear-layer assertions can drive both the
+            // "confirmed" and "cancelled" branches without a real dialog.
+            // Mirrors how mockHass substitutes for the real hass object —
+            // the original window.confirm reference is always restored, even
+            // if fn() throws, so no production code path is ever left
+            // permanently altered (T-02-T1).
+            function withStubbedConfirm(returnValue, fn) {
+                const originalConfirm = window.confirm;
+                window.confirm = () => returnValue;
+                try {
+                    return fn();
+                } finally {
+                    window.confirm = originalConfirm;
+                }
+            }
+
+            // Test utility (Wave 0, EXP-03/D-08): temporarily stub the
+            // clipboard surface (navigator.clipboard, document.execCommand,
+            // window.isSecureContext) so the Export suite can drive all
+            // three fallback tiers (Clipboard API / execCommand / visible
+            // textarea) deterministically, without ever touching the real
+            // system clipboard. Mirrors withStubbedConfirm()'s
+            // always-restore-in-finally discipline exactly: every stubbed
+            // global is saved before mutation and restored in `finally`,
+            // even if fn() throws, so no production code path is ever left
+            // permanently altered (T-02-T1 analog for this suite).
+            //
+            // opts:
+            //   clipboardAvailable   - false to simulate navigator.clipboard
+            //                          being entirely absent (insecure
+            //                          context in some browsers). Defaults
+            //                          to a stubbed object being present.
+            //   writeTextRejects     - true to make the stubbed
+            //                          navigator.clipboard.writeText() return
+            //                          a rejected promise (tier 1 failure).
+            //   execCommandResult    - boolean returned by the stubbed
+            //                          document.execCommand('copy') (tier 2
+            //                          success/failure signal, Pitfall 7).
+            //                          Defaults to true.
+            //   isSecureContext      - overrides window.isSecureContext for
+            //                          the duration of fn() (Pitfall 8).
+            function withStubbedClipboard(opts, fn) {
+                const options = opts || {};
+                const originalClipboardDescriptor =
+                    Object.getOwnPropertyDescriptor(
+                        navigator,
+                        "clipboard",
+                    );
+                const originalExecCommand = document.execCommand;
+                const originalIsSecureContextDescriptor =
+                    Object.getOwnPropertyDescriptor(window, "isSecureContext");
+
+                try {
+                    if (options.clipboardAvailable === false) {
+                        Object.defineProperty(navigator, "clipboard", {
+                            value: undefined,
+                            configurable: true,
+                        });
+                    } else {
+                        Object.defineProperty(navigator, "clipboard", {
+                            value: {
+                                writeText: () =>
+                                    options.writeTextRejects
+                                        ? Promise.reject(
+                                              new Error(
+                                                  "stubbed clipboard write rejected",
+                                              ),
+                                          )
+                                        : Promise.resolve(),
+                            },
+                            configurable: true,
+                        });
+                    }
+
+                    document.execCommand = () =>
+                        options.execCommandResult !== undefined
+                            ? options.execCommandResult
+                            : true;
+
+                    if (options.isSecureContext !== undefined) {
+                        Object.defineProperty(window, "isSecureContext", {
+                            value: options.isSecureContext,
+                            configurable: true,
+                        });
+                    }
+
+                    return fn();
+                } finally {
+                    if (originalClipboardDescriptor) {
+                        Object.defineProperty(
+                            navigator,
+                            "clipboard",
+                            originalClipboardDescriptor,
+                        );
+                    } else {
+                        delete navigator.clipboard;
+                    }
+                    document.execCommand = originalExecCommand;
+                    if (originalIsSecureContextDescriptor) {
+                        Object.defineProperty(
+                            window,
+                            "isSecureContext",
+                            originalIsSecureContextDescriptor,
+                        );
+                    } else {
+                        delete window.isSecureContext;
+                    }
+                }
+            }
+
             function setMounting(position) {
                 const card = document.getElementById("test-card");
                 card.config.mounting_position = position;
@@ -412,30 +848,2402 @@
                 card.hass = mockHass;
             }
 
+            // Ensures #test-card is fully configured (setConfig + first hass
+            // push) exactly once. Idempotent so it can be called both from
+            // the "DOMContentLoaded" listener below AND from the Phase 2
+            // editor suite's trailing <script> tag (Wave 0) — that trailing
+            // script runs synchronously during initial HTML parsing, BEFORE
+            // "DOMContentLoaded" fires, so it cannot assume the card is
+            // already set up and calls this helper itself first.
+            function ensureTestCardInitialized() {
+                const card = document.getElementById("test-card");
+                if (!card.config || !card.config.entity_prefix) {
+                    initMockEntities();
+                    card.setConfig({
+                        entity_prefix: "sensor.fp2_test",
+                        title: "Test FP2 Sensor",
+                        display_mode: "full",
+                        show_grid: true,
+                        show_sensor_position: true,
+                        show_zone_labels: true,
+                        mounting_position: "wall",
+                        // Position conversion settings (for debugging if values don't match):
+                        // position_scale: 0.01,    // Default: 0.01 (1/100 fixed-point)
+                        // position_bias_x: 0,      // Default: 0 (no X offset)
+                        // position_bias_y: 0,      // Default: 0 (no Y offset)
+                    });
+                }
+                if (!card._hass) {
+                    card.hass = mockHass;
+                }
+                return card;
+            }
+
             // Initialize when page loads
             window.addEventListener("DOMContentLoaded", () => {
-                initMockEntities();
-
-                const card = document.getElementById("test-card");
-                card.setConfig({
-                    entity_prefix: "sensor.fp2_test",
-                    title: "Test FP2 Sensor",
-                    display_mode: "full",
-                    show_grid: true,
-                    show_sensor_position: true,
-                    show_zone_labels: true,
-                    mounting_position: "wall",
-                    // Position conversion settings (for debugging if values don't match):
-                    // position_scale: 0.01,    // Default: 0.01 (1/100 fixed-point)
-                    // position_bias_x: 0,      // Default: 0 (no X offset)
-                    // position_bias_y: 0,      // Default: 0 (no Y offset)
-                });
-
-                card.hass = mockHass;
+                ensureTestCardInitialized();
             });
         </script>
 
         <!-- Include the card implementation from card.js -->
         <script src="card.js"></script>
+
+        <!--
+            Round-trip codec test suite (D-03, D-04, GRID-04).
+            Runs AFTER the card.js include above so window.FP2Codec is defined —
+            classic (non-async/defer) <script src> tags block subsequent inline
+            scripts until they finish loading and executing, so no separate
+            load-event listener is needed here.
+        -->
+        <script>
+            (function () {
+                const panel = document.getElementById("fp2-roundtrip-rows");
+                let passCount = 0;
+                let failCount = 0;
+
+                // Hand-rolled assert helper (no test framework exists in this
+                // repo per D-03/TESTING.md). Renders a PASS/FAIL row on the
+                // on-page panel and logs to the console using the existing
+                // [FP2 Card] log-tag convention.
+                function assert(condition, message) {
+                    const row = document.createElement("div");
+                    row.className =
+                        "fp2-result-row " +
+                        (condition ? "fp2-result-pass" : "fp2-result-fail");
+                    row.textContent = (condition ? "✓ " : "✗ ") + message;
+                    panel.appendChild(row);
+                    if (condition) {
+                        passCount++;
+                        console.log(`[FP2 Card] ✓ ${message}`);
+                    } else {
+                        failCount++;
+                        console.error(`[FP2 Card] ✗ ${message}`);
+                    }
+                    return condition;
+                }
+
+                // Synthetic hand-authored fixtures (D-04). Each `hex` literal is
+                // the canonical 80-char (20-row) parse_ascii_grid/grid_to_hex_string
+                // format, hand-computed from the Python bit math (offset_row=0,
+                // offset_col=2, MSB-first, big-endian per row) — see 01-RESEARCH.md
+                // "Known-good fixture hex values". These are an EXTERNAL reference,
+                // independent of this file's own codec calls, guarding against a
+                // symmetric encode/decode bug that a round-trip-only check would
+                // miss (RESEARCH Pitfall 3).
+                const FIXTURES = [
+                    {
+                        name: "empty grid",
+                        ascii: Array(14).fill(".".repeat(14)).join("\n"),
+                        hex: "00".repeat(40), // 80 chars, all zero
+                    },
+                    {
+                        name: "all-active grid",
+                        // Every cell active: out_c ranges 2..15 for c=0..13, so bits
+                        // 13..0 are set -> row_val = 0x3fff for all 14 input rows;
+                        // rows 14-19 (offset_row=0 never reaches them) stay zero.
+                        ascii: Array(14).fill("X".repeat(14)).join("\n"),
+                        hex: "3fff".repeat(14) + "0000".repeat(6), // 80 chars
+                    },
+                    {
+                        name: "single-cell row0/col0",
+                        // out_r=0, out_c=0+2=2, bit=1<<(15-2)=0x2000 -> row0="2000"
+                        ascii:
+                            "X".repeat(1) +
+                            ".".repeat(13) +
+                            "\n" +
+                            Array(13).fill(".".repeat(14)).join("\n"),
+                        hex: "2000" + "0000".repeat(19), // 80 chars
+                    },
+                    {
+                        name: "single-cell row13/col13",
+                        // out_r=13, out_c=13+2=15, bit=1<<(15-15)=0x0001 -> row13="0001"
+                        ascii:
+                            Array(13).fill(".".repeat(14)).join("\n") +
+                            "\n" +
+                            ".".repeat(13) +
+                            "X",
+                        hex: "0000".repeat(13) + "0001" + "0000".repeat(6), // 80 chars
+                    },
+                    {
+                        name: "col-0/col-13 edge grid (offset_col=2 boundary)",
+                        // Every row has col=0 and col=13 active:
+                        // col0: out_c=2, bit=0x2000; col13: out_c=15, bit=0x0001
+                        // row_val = 0x2000 | 0x0001 = 0x2001 for all 14 input rows.
+                        ascii: Array(14)
+                            .fill("X" + ".".repeat(12) + "X")
+                            .join("\n"),
+                        hex: "2001".repeat(14) + "0000".repeat(6), // 80 chars
+                    },
+                ];
+
+                function gridsEqual(a, b) {
+                    if (!a || !b || a.length !== b.length) return false;
+                    for (let r = 0; r < a.length; r++) {
+                        if (!a[r] || !b[r] || a[r].length !== b[r].length)
+                            return false;
+                        for (let c = 0; c < a[r].length; c++) {
+                            if (a[r][c] !== b[r][c]) return false;
+                        }
+                    }
+                    return true;
+                }
+
+                function runRoundTripSuite() {
+                    panel.innerHTML = "";
+
+                    if (!window.FP2Codec) {
+                        assert(
+                            false,
+                            "window.FP2Codec is defined (codec not yet implemented — expected RED until Plan 02)",
+                        );
+                        renderSummary();
+                        return;
+                    }
+
+                    const {
+                        asciiToGrid,
+                        gridToAscii,
+                        gridToHex,
+                        hexToGrid,
+                    } = window.FP2Codec;
+
+                    FIXTURES.forEach((fixture) => {
+                        const grid = asciiToGrid(fixture.ascii);
+
+                        // Invariant 1: asciiToGrid ∘ gridToAscii == identity
+                        assert(
+                            gridToAscii(grid) === fixture.ascii,
+                            `[${fixture.name}] asciiToGrid/gridToAscii round-trip identity`,
+                        );
+
+                        // Invariant 2: gridToHex output is exactly 80 hex chars
+                        const encodedHex = gridToHex(grid);
+                        assert(
+                            encodedHex.length === 80,
+                            `[${fixture.name}] gridToHex output length === 80`,
+                        );
+
+                        // Invariant 3: hexToGrid ∘ gridToHex == identity
+                        assert(
+                            gridsEqual(hexToGrid(encodedHex), grid),
+                            `[${fixture.name}] hexToGrid/gridToHex round-trip identity`,
+                        );
+
+                        // Invariant 4: hexToGrid decodes both the 56-char (live,
+                        // 14-row) and 80-char (canonical, 20-row) forms of each
+                        // fixture to the same grid.
+                        const hex56 = fixture.hex.substring(0, 56);
+                        assert(
+                            gridsEqual(
+                                hexToGrid(hex56),
+                                hexToGrid(fixture.hex),
+                            ),
+                            `[${fixture.name}] hexToGrid decodes 56-char and 80-char forms identically`,
+                        );
+
+                        // Invariant 5: hand-computed external hex literal matches
+                        // gridToHex(asciiToGrid(ascii)), and hexToGrid(hex) matches
+                        // the expected grid — guards against a symmetric
+                        // encode/decode bug (RESEARCH Pitfall 3).
+                        assert(
+                            encodedHex === fixture.hex,
+                            `[${fixture.name}] gridToHex(asciiToGrid(ascii)) matches hand-computed hex literal`,
+                        );
+                        assert(
+                            gridsEqual(hexToGrid(fixture.hex), grid),
+                            `[${fixture.name}] hexToGrid(hex) matches expected grid`,
+                        );
+                    });
+
+                    renderSummary();
+                }
+
+                function renderSummary() {
+                    const summary = document.createElement("div");
+                    summary.className = "fp2-result-summary";
+                    summary.textContent = `${passCount} passed, ${failCount} failed`;
+                    panel.appendChild(summary);
+                    console.log(
+                        `[FP2 Card] Round-trip suite: ${passCount} passed, ${failCount} failed`,
+                    );
+                }
+
+                runRoundTripSuite();
+            })();
+
+            // Editor-mode state-separation suite (Phase 2, Wave 0/Nyquist).
+            // Asserts the 6 invariants in 02-VALIDATION.md against a card-side
+            // API (editing/editorState/selectedLayer, toggleEditMode()/
+            // populateLayerSelect()/clearSelectedLayer()) that does NOT exist
+            // yet — Plans 02-02 and 02-03 implement it. Every assertion below
+            // is defensive: a missing/undefined card-side method or DOM node
+            // renders a failing (red) row, it never throws past this suite.
+            (function () {
+                const panel = document.getElementById("fp2-editor-rows");
+                let passCount = 0;
+                let failCount = 0;
+
+                // Same shape as the round-trip suite's assert() above, kept
+                // as an independent copy so the two suites' pass/fail counts
+                // and panels never interfere with each other.
+                function assert(condition, message) {
+                    const row = document.createElement("div");
+                    row.className =
+                        "fp2-result-row " +
+                        (condition ? "fp2-result-pass" : "fp2-result-fail");
+                    row.textContent = (condition ? "✓ " : "✗ ") + message;
+                    panel.appendChild(row);
+                    if (condition) {
+                        passCount++;
+                        console.log(`[FP2 Card] ✓ ${message}`);
+                    } else {
+                        failCount++;
+                        console.error(`[FP2 Card] ✗ ${message}`);
+                    }
+                    return condition;
+                }
+
+                function gridsEqual(a, b) {
+                    if (!a || !b || a.length !== b.length) return false;
+                    for (let r = 0; r < a.length; r++) {
+                        if (!a[r] || !b[r] || a[r].length !== b[r].length)
+                            return false;
+                        for (let c = 0; c < a[r].length; c++) {
+                            if (a[r][c] !== b[r][c]) return false;
+                        }
+                    }
+                    return true;
+                }
+
+                function isAllZeroGrid(grid) {
+                    if (!Array.isArray(grid)) return false;
+                    return grid.every(
+                        (row) =>
+                            Array.isArray(row) && row.every((cell) => !cell),
+                    );
+                }
+
+                // Grabs #test-card and guarantees it is configured with a
+                // resolved mapConfig before assertions run. See
+                // ensureTestCardInitialized()'s comment above for why this
+                // suite cannot assume the card is already initialized.
+                function prepareCard() {
+                    const card =
+                        typeof ensureTestCardInitialized === "function"
+                            ? ensureTestCardInitialized()
+                            : document.getElementById("test-card");
+                    // mapConfig is normally populated asynchronously by the
+                    // mocked fetchMapConfig() service call; seed it
+                    // synchronously from the fixture so edit-mode entry is
+                    // never blocked/racy in this suite.
+                    if (!card.mapConfig) {
+                        card.mapConfig = FIXTURE_MAP_CONFIG;
+                    }
+                    return card;
+                }
+
+                // --- Invariant: entering edit mode seeds editorState from
+                // the currently-decoded grids (EDIT-01, EDIT-02/D-02) ---
+                function invariantEnterAndSeed(card) {
+                    const hasToggle = assert(
+                        typeof card.toggleEditMode === "function",
+                        "card.toggleEditMode() exists (EDIT-01)",
+                    );
+                    if (!hasToggle) {
+                        assert(
+                            false,
+                            "Seed on entry (D-02): editorState populated from decoded grids on entry [skipped: toggleEditMode missing]",
+                        );
+                        return;
+                    }
+
+                    try {
+                        card.toggleEditMode();
+                    } catch (e) {
+                        assert(
+                            false,
+                            `card.toggleEditMode() threw on entry: ${e.message}`,
+                        );
+                        return;
+                    }
+
+                    assert(
+                        card.editing === true,
+                        "toggleEditMode() sets card.editing = true (EDIT-01)",
+                    );
+
+                    let decoded = null;
+                    try {
+                        decoded = card.gatherEntityData();
+                    } catch (e) {
+                        assert(
+                            false,
+                            `card.gatherEntityData() threw while verifying seed: ${e.message}`,
+                        );
+                        return;
+                    }
+
+                    const es = card.editorState;
+                    const seeded =
+                        !!es &&
+                        gridsEqual(es.interference, decoded.interferenceGrid) &&
+                        gridsEqual(es.exit, decoded.entryExitGrid) &&
+                        gridsEqual(es.edge, decoded.edgeLabelGrid) &&
+                        Array.isArray(decoded.zones) &&
+                        decoded.zones.every((zone, i) =>
+                            gridsEqual(es[`zone:${i}`], zone.map),
+                        );
+                    assert(
+                        seeded,
+                        "Seed on entry (D-02): editorState has interference/exit/edge + one key per zone matching the currently-decoded grids",
+                    );
+                }
+
+                // --- Invariant: layer selector enumerates fixed layers + N
+                // zones dynamically, "Zone N" fallback for missing labels
+                // (EDIT-03/D-03, Pitfall 4) ---
+                function invariantLayerSelect(card) {
+                    if (typeof card.populateLayerSelect === "function") {
+                        try {
+                            card.populateLayerSelect();
+                        } catch (e) {
+                            assert(
+                                false,
+                                `card.populateLayerSelect() threw: ${e.message}`,
+                            );
+                        }
+                    } else {
+                        assert(
+                            false,
+                            "card.populateLayerSelect() exists (EDIT-03)",
+                        );
+                    }
+
+                    const select =
+                        typeof card.querySelector === "function"
+                            ? card.querySelector(".layer-select")
+                            : null;
+                    const zoneCount =
+                        card.mapConfig && Array.isArray(card.mapConfig.zones)
+                            ? card.mapConfig.zones.length
+                            : 0;
+
+                    if (
+                        !assert(
+                            !!select,
+                            "Layer select (.layer-select) exists in the DOM (EDIT-03)",
+                        )
+                    ) {
+                        assert(
+                            false,
+                            `Layer select option count === 3 + zones.length (3 + ${zoneCount}) [skipped: select missing]`,
+                        );
+                        assert(
+                            false,
+                            'Second zone (no presence_sensor) renders as "Zone 2" fallback label (D-03) [skipped: select missing]',
+                        );
+                        return;
+                    }
+
+                    assert(
+                        select.options.length === 3 + zoneCount,
+                        `Layer select has 3 fixed layers + ${zoneCount} zone(s) = ${3 + zoneCount} options`,
+                    );
+
+                    // Options: 0=interference, 1=exit, 2=edge, 3=zone[0]
+                    // ("zone_1_presence"), 4=zone[1] (no presence_sensor).
+                    const secondZoneOption = select.options[4];
+                    assert(
+                        !!secondZoneOption &&
+                            secondZoneOption.textContent.trim() === "Zone 2",
+                        'Second fixture zone (no presence_sensor) renders as "Zone 2" fallback label (D-03, Pitfall 4)',
+                    );
+                }
+
+                // --- Invariant: live push does not clobber edits (EDIT-02,
+                // D-01) ---
+                function invariantLivePushNoClobber(card) {
+                    if (card.editing !== true || !card.editorState) {
+                        assert(
+                            false,
+                            "Live push does not clobber edits (EDIT-02) [skipped: not in edit mode]",
+                        );
+                        return;
+                    }
+
+                    const targetsKey = "sensor.fp2_test_targets";
+                    const before = JSON.stringify(card.editorState);
+                    const beforeTargets = mockHassStates[targetsKey].state;
+
+                    // Push new live target data through the exact seam a real
+                    // HA frontend uses ("card.hass = <object>") — must NOT
+                    // touch the editorState grids per D-01.
+                    mockHassStates[targetsKey].state = JSON.stringify([
+                        { id: 99, x: 500, y: 500, velocity_x: 0, velocity_y: 0 },
+                    ]);
+                    try {
+                        card.hass = mockHass;
+                    } catch (e) {
+                        assert(
+                            false,
+                            `card.hass = mockHass threw while editing: ${e.message}`,
+                        );
+                    }
+
+                    const after = JSON.stringify(card.editorState);
+                    assert(
+                        after === before,
+                        "Live hass push while editing leaves editorState byte-identical (EDIT-02/D-01)",
+                    );
+
+                    assert(
+                        mockHassStates[targetsKey].state !== beforeTargets,
+                        "Live hass push while editing still updates the underlying live target data (D-01 overlay stays live)",
+                    );
+                }
+
+                // --- Invariant: deep-copy independence (EDIT-02, Pitfall 1)
+                // ---
+                function invariantDeepCopyIndependence(card) {
+                    if (
+                        card.editing !== true ||
+                        !card.editorState ||
+                        !card.editorState.interference
+                    ) {
+                        assert(
+                            false,
+                            "Deep-copy independence (EDIT-02) [skipped: editorState.interference not seeded]",
+                        );
+                        return;
+                    }
+
+                    const originalCell = card.editorState.interference[0][0];
+                    card.editorState.interference[0][0] = originalCell
+                        ? 0
+                        : 1;
+
+                    let decoded = null;
+                    try {
+                        decoded = card.gatherEntityData();
+                    } catch (e) {
+                        assert(
+                            false,
+                            `card.gatherEntityData() threw while verifying deep-copy independence: ${e.message}`,
+                        );
+                        return;
+                    }
+
+                    assert(
+                        decoded.interferenceGrid[0][0] === originalCell,
+                        "Mutating an editorState grid cell never mutates the freshly-decoded source grid (Pitfall 1: per-row .slice(), not [...grid])",
+                    );
+
+                    // Restore so later invariants see a clean state.
+                    card.editorState.interference[0][0] = originalCell;
+                }
+
+                // --- Invariant: Clear empties only the selected layer,
+                // behind confirm() (EDIT-04/D-05) ---
+                function invariantClearScope(card) {
+                    if (card.editing !== true || !card.editorState) {
+                        assert(
+                            false,
+                            "Clear scope (EDIT-04) [skipped: not in edit mode]",
+                        );
+                        return;
+                    }
+                    if (typeof card.clearSelectedLayer !== "function") {
+                        assert(
+                            false,
+                            "card.clearSelectedLayer() exists (EDIT-04)",
+                        );
+                        return;
+                    }
+
+                    card.selectedLayer = "interference";
+                    const otherLayerBefore = card.editorState.exit
+                        ? JSON.stringify(card.editorState.exit)
+                        : null;
+
+                    // Cancel branch: confirm() = false -> no-op.
+                    const beforeCancel = JSON.stringify(
+                        card.editorState.interference,
+                    );
+                    withStubbedConfirm(false, () =>
+                        card.clearSelectedLayer(),
+                    );
+                    assert(
+                        JSON.stringify(card.editorState.interference) ===
+                            beforeCancel,
+                        'Clear with confirm() = false is a no-op (D-05 "cancel" branch)',
+                    );
+
+                    // Confirm branch: confirm() = true -> only the selected
+                    // layer is emptied.
+                    withStubbedConfirm(true, () => card.clearSelectedLayer());
+                    assert(
+                        isAllZeroGrid(card.editorState.interference),
+                        "Clear with confirm() = true empties ONLY the selected layer (D-05, EDIT-04)",
+                    );
+                    assert(
+                        otherLayerBefore === null ||
+                            JSON.stringify(card.editorState.exit) ===
+                                otherLayerBefore,
+                        "Clear does not affect other editorState layers (D-05 scope)",
+                    );
+                }
+
+                // --- Invariant: exiting edit mode returns to live view
+                // (EDIT-01) ---
+                function invariantExitReturnsLive(card) {
+                    if (typeof card.toggleEditMode !== "function") {
+                        assert(
+                            false,
+                            "Exit returns to live view (EDIT-01) [skipped: toggleEditMode missing]",
+                        );
+                        return;
+                    }
+                    try {
+                        card.toggleEditMode();
+                    } catch (e) {
+                        assert(
+                            false,
+                            `card.toggleEditMode() threw on exit: ${e.message}`,
+                        );
+                        return;
+                    }
+                    assert(
+                        card.editing === false,
+                        "toggleEditMode() called again sets card.editing = false (EDIT-01)",
+                    );
+                }
+
+                // --- Invariant (Phase 3, GEOM-01/D-01): renderParams covers
+                // the full 14x14 grid while editing regardless of
+                // displayMode, and the live target overlay keeps rendering
+                // under those full-grid params (extends the Phase 2
+                // freeze-seam assertion above). RED-baseline until Plan
+                // 03-02 adds the full-grid override. ---
+                function invariantFullGridRenderParams(card) {
+                    if (card.editing !== true) {
+                        assert(
+                            false,
+                            "GEOM-01: renderParams covers the full 14x14 grid while editing regardless of displayMode [skipped: not in edit mode]",
+                        );
+                        return;
+                    }
+
+                    const rp = card.renderParams;
+                    const isFullGrid =
+                        !!rp &&
+                        rp.minX === 0 &&
+                        rp.maxX === 13 &&
+                        rp.minY === 0 &&
+                        rp.maxY === 13;
+                    assert(
+                        isFullGrid,
+                        `GEOM-01: renderParams is minX=0/maxX=13/minY=0/maxY=13 while editing (displayMode=${card.displayMode}) [got ${rp ? JSON.stringify(rp) : "undefined"}]`,
+                    );
+
+                    // Push a live target update through the same seam
+                    // invariantLivePushNoClobber uses above and confirm it
+                    // does not throw and renderParams stays full-grid.
+                    const targetsKey = "sensor.fp2_test_targets";
+                    const beforeTargets = mockHassStates[targetsKey].state;
+                    mockHassStates[targetsKey].state = JSON.stringify([
+                        {
+                            id: 98,
+                            x: -300,
+                            y: 300,
+                            velocity_x: 0,
+                            velocity_y: 0,
+                        },
+                    ]);
+                    let threw = false;
+                    try {
+                        card.hass = mockHass;
+                    } catch (e) {
+                        threw = true;
+                        console.error(
+                            `[FP2 Card] GEOM-01: live target push while editing threw: ${e.message}`,
+                        );
+                    }
+                    mockHassStates[targetsKey].state = beforeTargets;
+
+                    const rpAfter = card.renderParams;
+                    const stillFullGrid =
+                        !!rpAfter &&
+                        rpAfter.minX === 0 &&
+                        rpAfter.maxX === 13 &&
+                        rpAfter.minY === 0 &&
+                        rpAfter.maxY === 13;
+                    assert(
+                        !threw && stillFullGrid,
+                        "GEOM-01: live target overlay renders under full-grid renderParams while editing (no throw, bounds unchanged)",
+                    );
+                }
+
+                function renderSummary() {
+                    const summary = document.createElement("div");
+                    summary.className = "fp2-result-summary";
+                    summary.textContent = `${passCount} passed, ${failCount} failed`;
+                    panel.appendChild(summary);
+                    console.log(
+                        `[FP2 Card] Editor suite: ${passCount} passed, ${failCount} failed`,
+                    );
+                }
+
+                function runEditorSuite() {
+                    panel.innerHTML = "";
+
+                    try {
+                        const card = prepareCard();
+                        invariantEnterAndSeed(card);
+                        invariantLayerSelect(card);
+                        invariantLivePushNoClobber(card);
+                        invariantDeepCopyIndependence(card);
+                        invariantFullGridRenderParams(card);
+                        invariantClearScope(card);
+                        invariantExitReturnsLive(card);
+                    } catch (e) {
+                        assert(
+                            false,
+                            `Editor suite crashed unexpectedly: ${e.message}`,
+                        );
+                        console.error(
+                            `[FP2 Card] Editor suite uncaught exception:`,
+                            e,
+                        );
+                    }
+
+                    renderSummary();
+                }
+
+                window.runEditorSuite = runEditorSuite;
+                runEditorSuite();
+            })();
+        </script>
+
+        <!--
+            Painting & Geometry test suite (Phase 3, Wave 0). Runs after the
+            card.js include and after the existing suites. Own local
+            passCount/failCount and own assert() copy — does not share state
+            with the round-trip or editor suites. Covers 03-VALIDATION.md
+            invariants 1,4,5,6,8 (pure window.FP2Geometry math — GREEN now)
+            and 2,3 (PAINT-02/PAINT-03 card-behavior — RED-baseline until
+            Plans 03-02/03-03 implement the paint pointer handlers and CSS).
+        -->
+        <script>
+            (function () {
+                const panel = document.getElementById("fp2-painting-rows");
+                let passCount = 0;
+                let failCount = 0;
+
+                // Same shape as the round-trip/editor suites' assert() above,
+                // kept as an independent copy per-suite isolation.
+                function assert(condition, message) {
+                    const row = document.createElement("div");
+                    row.className =
+                        "fp2-result-row " +
+                        (condition ? "fp2-result-pass" : "fp2-result-fail");
+                    row.textContent = (condition ? "✓ " : "✗ ") + message;
+                    panel.appendChild(row);
+                    if (condition) {
+                        passCount++;
+                        console.log(`[FP2 Card] ✓ ${message}`);
+                    } else {
+                        failCount++;
+                        console.error(`[FP2 Card] ✗ ${message}`);
+                    }
+                    return condition;
+                }
+
+                function noGap(cells) {
+                    for (let i = 1; i < cells.length; i++) {
+                        const dx = Math.abs(cells[i].x - cells[i - 1].x);
+                        const dy = Math.abs(cells[i].y - cells[i - 1].y);
+                        if (Math.max(dx, dy) > 1) return false;
+                    }
+                    return true;
+                }
+
+                // --- Invariant 1 (PAINT-01): walkCellsBetween covers every
+                // cell with no 2+ cell gap for horizontal/vertical/diagonal/
+                // steep/shallow segments; null first arg returns [b]. ---
+                function invariantWalkCellsBetween() {
+                    if (!window.FP2Geometry) {
+                        assert(
+                            false,
+                            "PAINT-01: window.FP2Geometry.walkCellsBetween exists [skipped: FP2Geometry not defined]",
+                        );
+                        return;
+                    }
+                    const { walkCellsBetween } = window.FP2Geometry;
+
+                    const cases = [
+                        {
+                            name: "horizontal",
+                            a: { x: 2, y: 5 },
+                            b: { x: 8, y: 5 },
+                        },
+                        {
+                            name: "vertical",
+                            a: { x: 5, y: 2 },
+                            b: { x: 5, y: 9 },
+                        },
+                        {
+                            name: "45-degree diagonal",
+                            a: { x: 0, y: 0 },
+                            b: { x: 6, y: 6 },
+                        },
+                        {
+                            name: "steep",
+                            a: { x: 1, y: 0 },
+                            b: { x: 3, y: 10 },
+                        },
+                        {
+                            name: "shallow",
+                            a: { x: 0, y: 1 },
+                            b: { x: 10, y: 3 },
+                        },
+                    ];
+
+                    cases.forEach(({ name, a, b }) => {
+                        const cells = walkCellsBetween(a, b);
+                        const includesEndpoints =
+                            cells.length > 0 &&
+                            cells[0].x === a.x &&
+                            cells[0].y === a.y &&
+                            cells[cells.length - 1].x === b.x &&
+                            cells[cells.length - 1].y === b.y;
+                        assert(
+                            includesEndpoints && noGap(cells),
+                            `PAINT-01: walkCellsBetween ${name} segment covers every cell with no 2+ cell gap`,
+                        );
+                    });
+
+                    const fromNull = walkCellsBetween(null, { x: 3, y: 4 });
+                    assert(
+                        Array.isArray(fromNull) &&
+                            fromNull.length === 1 &&
+                            fromNull[0].x === 3 &&
+                            fromNull[0].y === 4,
+                        "PAINT-01: walkCellsBetween(null, b) returns [b]",
+                    );
+                }
+
+                // --- Invariant 4 (GEOM-02): mirror is the exact inverse; a
+                // canonical cell displays at the mirrored column and a click
+                // on the mirrored column resolves back via
+                // invertColumnMirror. ---
+                function invariantMirrorInverse() {
+                    if (!window.FP2Geometry) {
+                        assert(
+                            false,
+                            "GEOM-02: window.FP2Geometry mirror functions exist [skipped: FP2Geometry not defined]",
+                        );
+                        return;
+                    }
+                    const { mirrorColumn, invertColumnMirror, applyGridMirror } =
+                        window.FP2Geometry;
+
+                    let allInverse = true;
+                    for (let c = 0; c < 14; c++) {
+                        if (invertColumnMirror(mirrorColumn(c), true) !== c) {
+                            allInverse = false;
+                        }
+                    }
+                    assert(
+                        allInverse,
+                        "GEOM-02: invertColumnMirror(mirrorColumn(c), true) === c for every c in 0..13",
+                    );
+
+                    const canonicalGrid = Array.from({ length: 14 }, (_, r) =>
+                        Array.from({ length: 14 }, (_, c) =>
+                            r === 3 && c === 5 ? 1 : 0,
+                        ),
+                    );
+                    const mirroredGrid = applyGridMirror(canonicalGrid, true);
+                    assert(
+                        mirroredGrid[3][8] === 1 && mirroredGrid[3][5] === 0,
+                        "GEOM-02: a canonical cell painted at column 5 displays at column 13-5=8 under mirror",
+                    );
+
+                    const identityGrid = applyGridMirror(canonicalGrid, false);
+                    const isIdentity = identityGrid.every((row, r) =>
+                        row.every((v, c) => v === canonicalGrid[r][c]),
+                    );
+                    assert(
+                        isIdentity,
+                        "GEOM-02: applyGridMirror(grid, false) is identity",
+                    );
+
+                    const resolvedBack = invertColumnMirror(8, true);
+                    assert(
+                        resolvedBack === 5,
+                        "GEOM-02: a click on displayed column 13-c=8 resolves back to canonical column 5 via invertColumnMirror",
+                    );
+                }
+
+                // --- Invariant 5: mirror functions never mutate their input
+                // (reference identity + content equality). ---
+                function invariantMirrorNonMutation() {
+                    if (!window.FP2Geometry) {
+                        assert(
+                            false,
+                            "Mirror non-mutation: window.FP2Geometry exists [skipped: FP2Geometry not defined]",
+                        );
+                        return;
+                    }
+                    const { applyGridMirror, applyGridXMirror } =
+                        window.FP2Geometry;
+
+                    const grid = [
+                        [1, 0, 0],
+                        [0, 1, 0],
+                        [0, 0, 1],
+                    ];
+                    const gridRef = grid;
+                    const gridSnapshot = JSON.stringify(grid);
+                    applyGridMirror(grid, true);
+                    assert(
+                        grid === gridRef &&
+                            JSON.stringify(grid) === gridSnapshot,
+                        "Mirror non-mutation: applyGridMirror never mutates its input grid (reference + content unchanged)",
+                    );
+
+                    const gridXBefore = 7;
+                    applyGridXMirror(gridXBefore, true);
+                    assert(
+                        gridXBefore === 7,
+                        "Mirror non-mutation: applyGridXMirror never mutates its (primitive) input",
+                    );
+                }
+
+                // --- Invariant 6 (GEOM-03/D-07): targetToGridXY at
+                // documented known raw (X,Y) pairs lands in the expected
+                // cell; applyGridXMirror flips it when left_right_reverse is
+                // true and leaves it unchanged when false. ---
+                function invariantTargetTransformSelfConsistency() {
+                    if (!window.FP2Geometry) {
+                        assert(
+                            false,
+                            "GEOM-03: window.FP2Geometry.targetToGridXY exists [skipped: FP2Geometry not defined]",
+                        );
+                        return;
+                    }
+                    const { targetToGridXY, applyGridXMirror } =
+                        window.FP2Geometry;
+                    const mountingPosition =
+                        FIXTURE_MAP_CONFIG.mounting_position;
+
+                    // Hand-computed for left_upper_corner:
+                    // gridX=(-rawX+400)/800*14, gridY=rawY/800*14.
+                    const table = [
+                        // Center of the 7m x 7m area -> mid-grid.
+                        { rawX: 0, rawY: 400, expectedGridX: 7, expectedGridY: 7 },
+                        // rawX=+400,rawY=0 -> sensor's top-left corner (0,0).
+                        { rawX: 400, rawY: 0, expectedGridX: 0, expectedGridY: 0 },
+                        // rawX=-400,rawY=800 -> opposite (bottom-right) corner.
+                        {
+                            rawX: -400,
+                            rawY: 800,
+                            expectedGridX: 14,
+                            expectedGridY: 14,
+                        },
+                    ];
+
+                    let allMatch = true;
+                    table.forEach(
+                        ({ rawX, rawY, expectedGridX, expectedGridY }) => {
+                            const { gridX, gridY } = targetToGridXY(
+                                rawX,
+                                rawY,
+                                mountingPosition,
+                            );
+                            if (
+                                Math.abs(gridX - expectedGridX) > 1e-9 ||
+                                Math.abs(gridY - expectedGridY) > 1e-9
+                            ) {
+                                allMatch = false;
+                            }
+                        },
+                    );
+                    assert(
+                        allMatch,
+                        `GEOM-03: targetToGridXY at documented known raw (X,Y) pairs lands in the expected grid cell for mounting_position=${mountingPosition}`,
+                    );
+
+                    const { gridX } = targetToGridXY(0, 400, mountingPosition);
+                    const mirroredWhenTrue = applyGridXMirror(gridX, true);
+                    const unchangedWhenFalse = applyGridXMirror(gridX, false);
+                    assert(
+                        mirroredWhenTrue === 14 - gridX &&
+                            unchangedWhenFalse === gridX,
+                        "GEOM-03/D-07: applyGridXMirror flips the target gridX when left_right_reverse=true and leaves it unchanged when false",
+                    );
+                }
+
+                // --- Invariant 8: canvasPosToGridCell never throws and
+                // faithfully reports out-of-range indices; malformed
+                // renderParams triggers the never-throw safe-default path. ---
+                function invariantBoundsSafety() {
+                    if (!window.FP2Geometry) {
+                        assert(
+                            false,
+                            "Bounds safety: window.FP2Geometry.canvasPosToGridCell exists [skipped: FP2Geometry not defined]",
+                        );
+                        return;
+                    }
+                    const { canvasPosToGridCell } = window.FP2Geometry;
+
+                    let threw = false;
+                    let outOfRange = null;
+                    try {
+                        // cellSize=20, minX=0,minY=0 -> floor(-50/20)+0 = -3 (out of 0..13)
+                        outOfRange = canvasPosToGridCell(-50, 500, {
+                            minX: 0,
+                            minY: 0,
+                            cellSize: 20,
+                        });
+                    } catch (e) {
+                        threw = true;
+                    }
+                    assert(
+                        !threw &&
+                            !!outOfRange &&
+                            (outOfRange.x < 0 || outOfRange.x > 13),
+                        "Bounds safety: canvasPosToGridCell does not throw and faithfully reports an out-of-range index for an out-of-bounds pointer position",
+                    );
+
+                    let malformedThrew = false;
+                    let malformedResult = null;
+                    try {
+                        malformedResult = canvasPosToGridCell(10, 10, null);
+                    } catch (e) {
+                        malformedThrew = true;
+                    }
+                    assert(
+                        !malformedThrew &&
+                            !!malformedResult &&
+                            (malformedResult.x < 0 || malformedResult.y < 0),
+                        "Bounds safety: canvasPosToGridCell never-throw safe-default path triggers on malformed renderParams",
+                    );
+                }
+
+                // Grabs #test-card and guarantees a resolved mapConfig,
+                // mirroring the editor suite's prepareCard() above — kept as
+                // an independent copy per-suite isolation.
+                function preparePaintingCard() {
+                    const card =
+                        typeof ensureTestCardInitialized === "function"
+                            ? ensureTestCardInitialized()
+                            : document.getElementById("test-card");
+                    if (!card.mapConfig) {
+                        card.mapConfig = FIXTURE_MAP_CONFIG;
+                    }
+                    return card;
+                }
+
+                // --- Invariant 2 (PAINT-02, RED-baseline): paint writes 1
+                // and erase (right-click) writes 0 to
+                // editorState[selectedLayer] only. Written now against the
+                // card.handlePointerDown/handlePointerUp pointer API that
+                // Plan 03-03 implements (03-PATTERNS.md), so this is RED
+                // until then. Wrapped in try/catch so a missing method
+                // renders a failing row, never an uncaught throw. ---
+                function invariantPaintEraseSemantics(card) {
+                    const hasHandlers =
+                        typeof card.handlePointerDown === "function" &&
+                        typeof card.handlePointerUp === "function";
+                    if (!hasHandlers) {
+                        assert(
+                            false,
+                            "PAINT-02: card.handlePointerDown()/handlePointerUp() exist for paint/erase (not yet implemented — expected RED until Plan 03-03)",
+                        );
+                        return;
+                    }
+
+                    const originalEditing = card.editing === true;
+                    if (
+                        !originalEditing &&
+                        typeof card.toggleEditMode === "function"
+                    ) {
+                        try {
+                            card.toggleEditMode();
+                        } catch (e) {
+                            assert(
+                                false,
+                                `PAINT-02: card.toggleEditMode() threw while preparing paint/erase check: ${e.message}`,
+                            );
+                            return;
+                        }
+                    }
+
+                    if (card.editing !== true || !card.editorState) {
+                        assert(
+                            false,
+                            "PAINT-02: paint sets editorState[selectedLayer] cell to 1, erase sets it to 0 [skipped: could not enter edit mode]",
+                        );
+                        return;
+                    }
+
+                    card.selectedLayer = "interference";
+                    const otherLayerBefore = card.editorState.exit
+                        ? JSON.stringify(card.editorState.exit)
+                        : null;
+
+                    const rp = card.renderParams || {
+                        minX: 0,
+                        minY: 0,
+                        cellSize: 20,
+                    };
+                    const rect =
+                        card.canvas &&
+                        typeof card.canvas.getBoundingClientRect ===
+                            "function"
+                            ? card.canvas.getBoundingClientRect()
+                            : { left: 0, top: 0 };
+                    const targetCol = 5;
+                    const targetRow = 5;
+                    const clientX =
+                        rect.left +
+                        (targetCol - rp.minX) * rp.cellSize +
+                        rp.cellSize / 2;
+                    const clientY =
+                        rect.top +
+                        (targetRow - rp.minY) * rp.cellSize +
+                        rp.cellSize / 2;
+
+                    try {
+                        card.handlePointerDown({
+                            clientX,
+                            clientY,
+                            button: 0,
+                            shiftKey: false,
+                            pointerId: 101,
+                            preventDefault() {},
+                        });
+                        card.handlePointerUp({
+                            pointerId: 101,
+                            preventDefault() {},
+                        });
+                    } catch (e) {
+                        assert(
+                            false,
+                            `PAINT-02: paint pointer sequence threw: ${e.message}`,
+                        );
+                        return;
+                    }
+
+                    assert(
+                        !!card.editorState.interference &&
+                            card.editorState.interference[targetRow][
+                                targetCol
+                            ] === 1,
+                        "PAINT-02: painting sets editorState[selectedLayer] cell to 1",
+                    );
+
+                    try {
+                        card.handlePointerDown({
+                            clientX,
+                            clientY,
+                            button: 2,
+                            shiftKey: false,
+                            pointerId: 102,
+                            preventDefault() {},
+                        });
+                        card.handlePointerUp({
+                            pointerId: 102,
+                            preventDefault() {},
+                        });
+                    } catch (e) {
+                        assert(
+                            false,
+                            `PAINT-02: erase (right-click) pointer sequence threw: ${e.message}`,
+                        );
+                        return;
+                    }
+
+                    assert(
+                        !!card.editorState.interference &&
+                            card.editorState.interference[targetRow][
+                                targetCol
+                            ] === 0,
+                        "PAINT-02: erase (right-click) sets editorState[selectedLayer] cell to 0",
+                    );
+                    assert(
+                        otherLayerBefore === null ||
+                            JSON.stringify(card.editorState.exit) ===
+                                otherLayerBefore,
+                        "PAINT-02: paint/erase only writes to editorState[selectedLayer], other layers unaffected",
+                    );
+
+                    if (
+                        !originalEditing &&
+                        typeof card.toggleEditMode === "function"
+                    ) {
+                        try {
+                            card.toggleEditMode();
+                        } catch (e) {
+                            /* best-effort restore, not asserted */
+                        }
+                    }
+                }
+
+                // --- Invariant 3 (PAINT-03, RED-baseline): #fp2-canvas with
+                // .editing-active has touch-action: none; without it, does
+                // not. RED until Plan 03-03 adds the CSS. ---
+                function invariantTouchActionScoping(card) {
+                    const canvas =
+                        card.canvas ||
+                        (typeof card.querySelector === "function"
+                            ? card.querySelector("#fp2-canvas")
+                            : null);
+                    if (!canvas) {
+                        assert(
+                            false,
+                            "PAINT-03: #fp2-canvas element exists [skipped: canvas not found]",
+                        );
+                        return;
+                    }
+
+                    const originalEditing = card.editing === true;
+
+                    if (
+                        originalEditing &&
+                        typeof card.toggleEditMode === "function"
+                    ) {
+                        try {
+                            card.toggleEditMode();
+                        } catch (e) {
+                            /* best-effort, checked below via class state */
+                        }
+                    }
+                    const nonEditingStyle = getComputedStyle(canvas);
+                    assert(
+                        !canvas.classList.contains("editing-active") &&
+                            nonEditingStyle.touchAction !== "none",
+                        `PAINT-03: canvas without .editing-active does not have touch-action: none (got "${nonEditingStyle.touchAction}")`,
+                    );
+
+                    if (typeof card.toggleEditMode === "function") {
+                        try {
+                            card.toggleEditMode();
+                        } catch (e) {
+                            /* best-effort, checked below via class state */
+                        }
+                    }
+                    const editingStyle = getComputedStyle(canvas);
+                    assert(
+                        canvas.classList.contains("editing-active") &&
+                            editingStyle.touchAction === "none",
+                        `PAINT-03: #fp2-canvas.editing-active has touch-action: none (got "${editingStyle.touchAction}") — expected RED until Plan 03-03`,
+                    );
+
+                    // Restore original editing state so this suite does not
+                    // leak state into any later re-run of other suites.
+                    if (
+                        card.editing !== originalEditing &&
+                        typeof card.toggleEditMode === "function"
+                    ) {
+                        try {
+                            card.toggleEditMode();
+                        } catch (e) {
+                            /* best-effort restore, not asserted */
+                        }
+                    }
+                }
+
+                function renderSummary() {
+                    const summary = document.createElement("div");
+                    summary.className = "fp2-result-summary";
+                    summary.textContent = `${passCount} passed, ${failCount} failed`;
+                    panel.appendChild(summary);
+                    console.log(
+                        `[FP2 Card] Painting & Geometry suite: ${passCount} passed, ${failCount} failed`,
+                    );
+                }
+
+                function runPaintingSuite() {
+                    panel.innerHTML = "";
+
+                    try {
+                        invariantWalkCellsBetween();
+                        invariantMirrorInverse();
+                        invariantMirrorNonMutation();
+                        invariantTargetTransformSelfConsistency();
+                        invariantBoundsSafety();
+
+                        const card = preparePaintingCard();
+                        invariantPaintEraseSemantics(card);
+                        invariantTouchActionScoping(card);
+                    } catch (e) {
+                        assert(
+                            false,
+                            `Painting & Geometry suite crashed unexpectedly: ${e.message}`,
+                        );
+                        console.error(
+                            `[FP2 Card] Painting & Geometry suite uncaught exception:`,
+                            e,
+                        );
+                    }
+
+                    renderSummary();
+                }
+
+                window.runPaintingSuite = runPaintingSuite;
+                runPaintingSuite();
+            })();
+        </script>
+
+        <!-- Export & Zone Controls results panel (Phase 4, Wave 0
+             red-baseline, ZONE-01..03/EXP-01..03/VAL-01, 04-VALIDATION.md).
+             Own independent assert()/passCount/failCount/panel/renderSummary,
+             mirroring the round-trip/editor/painting suites' idiom exactly
+             (Wave 0 Requirement). Placed AFTER the painting suite's closing
+             </script> and after <script src="card.js"> so
+             card.getOrSeedZoneMeta()/window.slugify()/window.ZONE_TYPES_JS
+             are available. Invariants 1 (ZONE-01 null-vs-none), 2 (ZONE-02
+             sensitivity seeding), and the slugify half of 9 (Pitfall 6) are
+             GREEN as of Plan 04-01 (getOrSeedZoneMeta()/slugify() exist).
+             Every other invariant references a card method Plan
+             04-02/04-03 add later and is RED-baseline until then — each is
+             guarded by a typeof-check-then-assert (exactly like
+             PAINT-02/PAINT-03 above) so a missing method renders a failing
+             row instead of throwing. -->
+        <script>
+            (function () {
+                const panel = document.getElementById("fp2-export-rows");
+                let passCount = 0;
+                let failCount = 0;
+
+                // Same shape as the other three suites' assert() —
+                // independent copy per-suite isolation (Wave 0 Requirement).
+                function assert(condition, message) {
+                    const row = document.createElement("div");
+                    row.className =
+                        "fp2-result-row " +
+                        (condition ? "fp2-result-pass" : "fp2-result-fail");
+                    row.textContent = (condition ? "✓ " : "✗ ") + message;
+                    panel.appendChild(row);
+                    if (condition) {
+                        passCount++;
+                        console.log(`[FP2 Card] ✓ ${message}`);
+                    } else {
+                        failCount++;
+                        console.error(`[FP2 Card] ✗ ${message}`);
+                    }
+                    return condition;
+                }
+
+                // Same idiom as preparePaintingCard() above: reuse the
+                // idempotent bootstrap, then guarantee mapConfig is the
+                // distinct-sensitivity fixture regardless of whether the
+                // live get_map_config mock has resolved yet.
+                function getExportTestCard() {
+                    const card =
+                        typeof ensureTestCardInitialized === "function"
+                            ? ensureTestCardInitialized()
+                            : document.getElementById("test-card");
+                    if (!card.mapConfig) {
+                        card.mapConfig = FIXTURE_MAP_CONFIG;
+                    }
+                    return card;
+                }
+
+                function makeGrid(fill) {
+                    return Array.from({ length: 14 }, () =>
+                        Array(14).fill(fill ? 1 : 0),
+                    );
+                }
+
+                // --- Invariant 1 (ZONE-01, GREEN as of Plan 04-01):
+                // zoneMeta.zoneType starts null (not 0/""/undefined) for
+                // both a device zone and a newly-added zone, so "untouched"
+                // and "explicitly none" stay distinguishable via === null
+                // (Pitfall 3/D-04). ---
+                function invariantZoneTypeNullVsNone(card) {
+                    if (typeof card.getOrSeedZoneMeta !== "function") {
+                        assert(
+                            false,
+                            "ZONE-01: card.getOrSeedZoneMeta() exists and zoneType starts null for device + new zones (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        const deviceMeta = card.getOrSeedZoneMeta("zone:0");
+                        const newMeta = card.getOrSeedZoneMeta("zone:new:0");
+                        assert(
+                            deviceMeta.zoneType === null &&
+                                newMeta.zoneType === null,
+                            'ZONE-01: zoneMeta.zoneType starts null (not 0/""/undefined) for both a device zone and a new zone',
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `ZONE-01: getOrSeedZoneMeta() threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 2 (ZONE-02, GREEN as of Plan 04-01):
+                // presenceSensitivity seeds from the live `sensitivity` int
+                // (1/2/3) via {1:low,2:medium,3:high} — NEVER from a
+                // `presence_sensitivity` key (Pitfall 1). FIXTURE_MAP_CONFIG
+                // zone[0]=2 (medium), zone[1]=3 (high) so this cannot pass
+                // by "everything defaults to medium" coincidence. ---
+                function invariantSensitivitySeeding(card) {
+                    if (typeof card.getOrSeedZoneMeta !== "function") {
+                        assert(
+                            false,
+                            "ZONE-02: card.getOrSeedZoneMeta() seeds presenceSensitivity from the live sensitivity int (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        const mediumMeta = card.getOrSeedZoneMeta("zone:0");
+                        const highMeta = card.getOrSeedZoneMeta("zone:1");
+                        const newMeta = card.getOrSeedZoneMeta("zone:new:0");
+                        assert(
+                            mediumMeta.presenceSensitivity === "medium" &&
+                                highMeta.presenceSensitivity === "high" &&
+                                newMeta.presenceSensitivity === "medium",
+                            `ZONE-02: presenceSensitivity seeds "medium" for the sensitivity:2 device zone and "high" for the sensitivity:3 device zone (Pitfall 1), defaults "medium" for a new zone (got zone:0=${mediumMeta.presenceSensitivity}, zone:1=${highMeta.presenceSensitivity}, new=${newMeta.presenceSensitivity})`,
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `ZONE-02: getOrSeedZoneMeta() threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 3 (ZONE-03, RED-baseline until Plan
+                // 04-02/04-03): motionTimeoutEnabled=false omits
+                // motion_timeout: entirely from the export; true emits
+                // exactly one motion_timeout: <N>s line. ---
+                function invariantMotionTimeoutOnlyIfSet(card) {
+                    if (
+                        typeof card.getOrSeedZoneMeta !== "function" ||
+                        typeof card.buildExportYaml !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "ZONE-03: card.buildExportYaml() omits motion_timeout: unless motionTimeoutEnabled is true, then emits exactly one motion_timeout: <N>s line (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        const meta = card.getOrSeedZoneMeta("zone:0");
+                        meta.motionTimeoutEnabled = false;
+                        const offYaml = card.buildExportYaml();
+                        meta.motionTimeoutEnabled = true;
+                        meta.motionTimeoutSeconds = 7;
+                        const onYaml = card.buildExportYaml();
+                        meta.motionTimeoutEnabled = false; // restore
+                        const onMatches =
+                            onYaml.match(/motion_timeout:\s*\d+s/g) || [];
+                        assert(
+                            !offYaml.includes("motion_timeout:") &&
+                                onMatches.length === 1 &&
+                                onMatches[0].includes("7s"),
+                            "ZONE-03: motion_timeout: omitted when disabled, exactly one motion_timeout: 7s line when enabled",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `ZONE-03: buildExportYaml() threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 4 (EXP-01, RED-baseline until Plan
+                // 04-02/04-03): every grid block in buildExportYaml()'s
+                // output, decoded back via FP2Codec.asciiToGrid, byte-matches
+                // the source editorState grid it was generated from. ---
+                function invariantExportRoundTrip(card) {
+                    if (
+                        typeof card.buildExportYaml !== "function" ||
+                        !window.FP2Codec
+                    ) {
+                        assert(
+                            false,
+                            "EXP-01: buildExportYaml()'s grid blocks round-trip byte-exact through FP2Codec.asciiToGrid (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        const sourceGrid = makeGrid(false);
+                        sourceGrid[2][2] = 1;
+                        sourceGrid[9][11] = 1;
+                        card.editorState.interference = sourceGrid;
+                        const yaml = card.buildExportYaml();
+                        const m = yaml.match(
+                            /interference_grid:\s*\|\n((?:\s{2,}.*\n?)+)/,
+                        );
+                        if (!m) {
+                            assert(
+                                false,
+                                "EXP-01: export round-trip [skipped: no interference_grid block emitted for a non-empty grid]",
+                            );
+                            return;
+                        }
+                        const asciiBlock = m[1]
+                            .split("\n")
+                            .filter((l) => l.trim().length > 0)
+                            .map((l) => l.trim())
+                            .join("\n");
+                        const decoded =
+                            window.FP2Codec.asciiToGrid(asciiBlock);
+                        assert(
+                            JSON.stringify(decoded) ===
+                                JSON.stringify(sourceGrid),
+                            "EXP-01: exported interference_grid block round-trips byte-exact through FP2Codec.asciiToGrid",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `EXP-01: export round-trip threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 5 (EXP-02, RED-baseline until Plan
+                // 04-02/04-03): only-set optional keys — zoneType=null /
+                // motionTimeoutEnabled=false emits zero zone_type:/
+                // motion_timeout: lines; empty global grids are omitted
+                // entirely. ---
+                function invariantOnlySetOptionalKeys(card) {
+                    if (
+                        typeof card.getOrSeedZoneMeta !== "function" ||
+                        typeof card.buildExportYaml !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "EXP-02: buildExportYaml() omits zone_type:/motion_timeout: when unset and omits empty global grids entirely (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        const meta = card.getOrSeedZoneMeta("zone:0");
+                        meta.zoneType = null;
+                        meta.motionTimeoutEnabled = false;
+                        card.editorState.exit = makeGrid(false); // empty -> omitted
+                        const yaml = card.buildExportYaml();
+                        assert(
+                            !yaml.includes("zone_type:") &&
+                                !yaml.includes("motion_timeout:") &&
+                                !yaml.includes("exit_grid:"),
+                            "EXP-02: zone_type:/motion_timeout: omitted when unset; empty exit_grid omitted entirely",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `EXP-02: buildExportYaml() threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 6 (EXP-03, RED-baseline until Plan
+                // 04-02/04-03): copyToClipboardWithFallback attempts tier 1
+                // only when the stub reports present + isSecureContext,
+                // falls to tier 2 when tier 1 absent, and always leaves the
+                // textarea populated (Pitfall 7/8). Driven via
+                // withStubbedClipboard so no real system clipboard is ever
+                // touched. ---
+                async function invariantClipboardFallbackChain(card) {
+                    if (typeof card.copyToClipboardWithFallback !== "function") {
+                        assert(
+                            false,
+                            "EXP-03: card.copyToClipboardWithFallback() attempts Clipboard API, falls back to execCommand, then a visible textarea (not yet implemented)",
+                        );
+                        return;
+                    }
+                    const textarea = document.createElement("textarea");
+                    textarea.value = "fp2-export-suite-fixture";
+                    document.body.appendChild(textarea);
+                    try {
+                        const tier1 = await withStubbedClipboard(
+                            { isSecureContext: true },
+                            () =>
+                                card.copyToClipboardWithFallback(
+                                    textarea.value,
+                                    textarea,
+                                ),
+                        );
+                        assert(
+                            tier1 === "clipboard-api",
+                            `EXP-03: tier 1 (navigator.clipboard.writeText) used when present + secure context (got "${tier1}")`,
+                        );
+
+                        const tier2 = await withStubbedClipboard(
+                            {
+                                clipboardAvailable: false,
+                                execCommandResult: true,
+                                isSecureContext: true,
+                            },
+                            () =>
+                                card.copyToClipboardWithFallback(
+                                    textarea.value,
+                                    textarea,
+                                ),
+                        );
+                        assert(
+                            tier2 === "exec-command",
+                            `EXP-03: falls back to tier 2 (execCommand) when Clipboard API absent (got "${tier2}")`,
+                        );
+
+                        assert(
+                            textarea.style.display !== "none" &&
+                                textarea.value === "fp2-export-suite-fixture",
+                            "EXP-03: the textarea stays populated/visible regardless of which tier succeeded",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `EXP-03: copyToClipboardWithFallback() threw: ${e.message}`,
+                        );
+                    } finally {
+                        textarea.remove();
+                    }
+                }
+
+                // --- Invariant 7 (VAL-01, RED-baseline until Plan
+                // 04-02/04-03): empty (0/196) and all-active (196/196) grids
+                // each produce exactly one suspicious entry; a normal
+                // partially-painted grid produces none; window.confirm()
+                // -cancel aborts the export before buildExportYaml()/
+                // clipboard ever run. ---
+                function invariantSuspiciousGridDetection(card) {
+                    if (
+                        typeof card.validateGridsForExport !== "function" ||
+                        typeof card.handleExportClick !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "VAL-01: validateGridsForExport()/handleExportClick() flag empty+all-active grids and gate export on window.confirm() (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        card.editorState.interference = makeGrid(false); // 0/196
+                        card.editorState.exit = makeGrid(true); // 196/196
+                        card.editorState.edge = (() => {
+                            const g = makeGrid(false);
+                            g[3][3] = 1;
+                            return g;
+                        })(); // normal, partially painted
+                        const suspicious = card.validateGridsForExport();
+                        const flaggedEmpty = suspicious.some((s) =>
+                            /interference/i.test(String(s)),
+                        );
+                        const flaggedFull = suspicious.some((s) =>
+                            /exit/i.test(String(s)),
+                        );
+                        const flaggedEdge = suspicious.some((s) =>
+                            /edge/i.test(String(s)),
+                        );
+                        assert(
+                            flaggedEmpty && flaggedFull && !flaggedEdge,
+                            "VAL-01: validateGridsForExport() flags the empty and all-active grids, not the normally-painted one",
+                        );
+
+                        let exported = false;
+                        const originalBuild = card.buildExportYaml;
+                        card.buildExportYaml = function (...args) {
+                            exported = true;
+                            return typeof originalBuild === "function"
+                                ? originalBuild.apply(card, args)
+                                : "";
+                        };
+                        try {
+                            withStubbedConfirm(false, () =>
+                                card.handleExportClick(),
+                            );
+                        } finally {
+                            card.buildExportYaml = originalBuild;
+                        }
+                        assert(
+                            !exported,
+                            "VAL-01: cancelling the suspicious-grid confirm() aborts before buildExportYaml()/clipboard ever run",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `VAL-01: suspicious-grid detection threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 8 (Add/Remove zone lifecycle, Pitfall 5,
+                // RED-baseline until Plan 04-02): addZone() creates a new
+                // zone:new:N key in both editorState and zoneMeta and
+                // selects it; removeZone() on a device-zone key is a no-op
+                // (D-02); an add->remove->add cycle never reuses a number
+                // still implied by a surviving zone (monotonic counter, not
+                // Object.keys().length). ---
+                function invariantAddRemoveLifecycle(card) {
+                    if (
+                        typeof card.addZone !== "function" ||
+                        typeof card.removeZone !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "Add/Remove: card.addZone()/removeZone() create/delete zone:new:N keys in editorState+zoneMeta and update the layer <select> (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        card.addZone();
+                        const firstKey = card.selectedLayer;
+                        const createdFirst =
+                            typeof firstKey === "string" &&
+                            firstKey.startsWith("zone:new:") &&
+                            !!card.editorState[firstKey] &&
+                            !!card.zoneMeta[firstKey];
+                        assert(
+                            createdFirst,
+                            "Add/Remove: addZone() creates a new zone:new:N key in both editorState and zoneMeta and selects it",
+                        );
+
+                        const deviceZoneBefore =
+                            !!card.editorState["zone:0"];
+                        card.removeZone("zone:0");
+                        assert(
+                            deviceZoneBefore === !!card.editorState["zone:0"],
+                            "Add/Remove: removeZone() on a device-zone key (zone:N) is a no-op — device zones are never deleted",
+                        );
+
+                        withStubbedConfirm(true, () =>
+                            card.removeZone(firstKey),
+                        );
+                        const removedFirst =
+                            !card.editorState[firstKey] &&
+                            !card.zoneMeta[firstKey];
+
+                        card.addZone();
+                        const secondKey = card.selectedLayer;
+                        assert(
+                            removedFirst &&
+                                typeof secondKey === "string" &&
+                                secondKey !== firstKey,
+                            `Add/Remove: an add->remove->add cycle never reuses a number still implied by a surviving zone (first="${firstKey}", second="${secondKey}")`,
+                        );
+
+                        // Cleanup — leave zoneMeta/editorState as this suite found them.
+                        withStubbedConfirm(true, () =>
+                            card.removeZone(secondKey),
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `Add/Remove: addZone()/removeZone() lifecycle threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 9 (Pitfall 6/ASVS V5): a zone label
+                // containing :/#/quote/newline never appears raw in the
+                // exported id: scalar position. The slugify() half is GREEN
+                // as of Plan 04-01 (top-level pure helper); the
+                // resolveZoneExportId()/export half is RED-baseline until
+                // Plan 04-03. ---
+                function invariantLabelInjectionSafety(card) {
+                    if (typeof window.slugify !== "function") {
+                        assert(
+                            false,
+                            "Label safety (slugify): window.slugify() exists and never emits :/#/quote/newline (not yet implemented)",
+                        );
+                    } else {
+                        const dangerousLabel =
+                            'Living Room: "Sofa" #1\nExtra';
+                        const slug = window.slugify(dangerousLabel);
+                        assert(
+                            !/[:#"'\n]/.test(slug) && slug.length > 0,
+                            `Label safety (slugify): slugify() strips :/#/quote/newline from a hostile label (got "${slug}")`,
+                        );
+                    }
+
+                    if (
+                        typeof card.resolveZoneExportId !== "function" ||
+                        typeof card.getOrSeedZoneMeta !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "Label safety (export): card.resolveZoneExportId() routes a locally-added zone's label through slugify() before it reaches the exported id: scalar (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        const key = "zone:new:0";
+                        const meta = card.getOrSeedZoneMeta(key);
+                        meta.label = 'Living Room: "Sofa"';
+                        const id = card.resolveZoneExportId(key);
+                        assert(
+                            !/[:#"'\n]/.test(id) && id.length > 0,
+                            `Label safety (export): resolveZoneExportId() never emits a raw :/#/quote/newline from the label (got "${id}")`,
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `Label safety (export): resolveZoneExportId() threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 10 (Pitfall 9, RED-baseline until Plan
+                // 04-03): validateGridsForExport() + window.confirm()
+                // complete synchronously and fully BEFORE
+                // buildExportYaml()/copyToClipboardWithFallback() run —
+                // cancelling never results in anything copied. ---
+                function invariantConfirmThenActOrdering(card) {
+                    if (
+                        typeof card.handleExportClick !== "function" ||
+                        typeof card.copyToClipboardWithFallback !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "Confirm-then-act: handleExportClick() completes validateGridsForExport()+confirm() fully before buildExportYaml()/copyToClipboardWithFallback() ever run (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        card.editorState.interference = makeGrid(false); // 0/196 -> suspicious
+                        let copyAttempted = false;
+                        const originalCopy =
+                            card.copyToClipboardWithFallback;
+                        card.copyToClipboardWithFallback = function (
+                            ...args
+                        ) {
+                            copyAttempted = true;
+                            return originalCopy.apply(card, args);
+                        };
+                        try {
+                            withStubbedConfirm(false, () =>
+                                card.handleExportClick(),
+                            );
+                        } finally {
+                            card.copyToClipboardWithFallback = originalCopy;
+                        }
+                        assert(
+                            !copyAttempted,
+                            "Confirm-then-act: cancelling the suspicious-grid confirm() never reaches copyToClipboardWithFallback()",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `Confirm-then-act: ordering check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                function renderSummary() {
+                    const summary = document.createElement("div");
+                    summary.className = "fp2-result-summary";
+                    summary.textContent = `${passCount} passed, ${failCount} failed`;
+                    panel.appendChild(summary);
+                    console.log(
+                        `[FP2 Card] Export & Zone Controls suite: ${passCount} passed, ${failCount} failed`,
+                    );
+                }
+
+                async function runExportSuite() {
+                    panel.innerHTML = "";
+
+                    try {
+                        const card = getExportTestCard();
+                        invariantZoneTypeNullVsNone(card);
+                        invariantSensitivitySeeding(card);
+                        invariantMotionTimeoutOnlyIfSet(card);
+                        invariantExportRoundTrip(card);
+                        invariantOnlySetOptionalKeys(card);
+                        await invariantClipboardFallbackChain(card);
+                        invariantSuspiciousGridDetection(card);
+                        invariantAddRemoveLifecycle(card);
+                        invariantLabelInjectionSafety(card);
+                        invariantConfirmThenActOrdering(card);
+                    } catch (e) {
+                        assert(
+                            false,
+                            `Export & Zone Controls suite crashed unexpectedly: ${e.message}`,
+                        );
+                        console.error(
+                            `[FP2 Card] Export & Zone Controls suite uncaught exception:`,
+                            e,
+                        );
+                    }
+
+                    renderSummary();
+                }
+
+                window.runExportSuite = runExportSuite;
+                runExportSuite();
+            })();
+        </script>
+
+        <!--
+             Import results panel test suite (Phase 5, IMP-01/IMP-02,
+             05-VALIDATION.md invariants 1-10). Own independent
+             assert()/passCount/failCount/panel/renderSummary, mirroring the
+             round-trip/editor/painting/export suites' idiom exactly (Wave 0
+             Requirement). Placed AFTER the export suite's closing </script>
+             AND after <script src="card.js"> so card.mergeImportedMapConfig()/
+             card.handleImportClick()/card.globalZoneMeta/
+             card.renderGlobalZoneControl() are available once Plan 05-02/05-01
+             land them. None of those exist yet as of Plan 05-01 Task 1, so
+             EVERY row below is written RED-baseline: each is guarded by a
+             typeof-check-then-assert (or, for invariant 8 which this plan's
+             Task 2 DOES implement, a try/catch) so a missing method renders a
+             failing row instead of throwing — exactly like the export suite's
+             invariants 3-10 were red-baseline after Plan 04-01.
+        -->
+        <script>
+            (function () {
+                const panel = document.getElementById("fp2-import-rows");
+                let passCount = 0;
+                let failCount = 0;
+
+                // Same shape as the other four suites' assert() —
+                // independent copy per-suite isolation (Wave 0 Requirement).
+                function assert(condition, message) {
+                    const row = document.createElement("div");
+                    row.className =
+                        "fp2-result-row " +
+                        (condition ? "fp2-result-pass" : "fp2-result-fail");
+                    row.textContent = (condition ? "✓ " : "✗ ") + message;
+                    panel.appendChild(row);
+                    if (condition) {
+                        passCount++;
+                        console.log(`[FP2 Card] ✓ ${message}`);
+                    } else {
+                        failCount++;
+                        console.error(`[FP2 Card] ✗ ${message}`);
+                    }
+                    return condition;
+                }
+
+                // Same idiom as getExportTestCard(): reuse the idempotent
+                // bootstrap, then guarantee mapConfig is the (first) fixture
+                // regardless of whether the live get_map_config mock has
+                // resolved yet.
+                function getImportTestCard() {
+                    const card =
+                        typeof ensureTestCardInitialized === "function"
+                            ? ensureTestCardInitialized()
+                            : document.getElementById("test-card");
+                    if (!card.mapConfig) {
+                        card.mapConfig = FIXTURE_MAP_CONFIG;
+                    }
+                    return card;
+                }
+
+                // Seeds editorState (and resets zoneMeta so it reseeds fresh
+                // from the fixture) directly from a fixture's decoded grids —
+                // the same per-row deep-copy shape toggleEditMode() uses
+                // (card.js:414-430), but callable on demand without flipping
+                // card.editing, matching every existing suite's "drive
+                // methods/state directly" convention.
+                function seedEditorStateFromFixture(card, fixture) {
+                    const decode = window.FP2Codec.hexToGrid;
+                    const editorState = {
+                        interference: decode(fixture.interference_grid),
+                        exit: decode(fixture.exit_grid),
+                        edge: decode(fixture.edge_grid),
+                    };
+                    (fixture.zones || []).forEach((zoneConfig, index) => {
+                        editorState[`zone:${index}`] = decode(
+                            zoneConfig.grid,
+                        );
+                    });
+                    card.editorState = editorState;
+                    card.zoneMeta = {};
+                    card._deviceZoneCount = (fixture.zones || []).length;
+                }
+
+                // --- Invariant 1 (IMP-01, RED-baseline until Plan 05-02):
+                // a cancelled window.confirm() in handleImportClick() performs
+                // neither a fetch nor a merge — nothing in
+                // editorState/zoneMeta/mapConfig/globalZoneMeta changes. ---
+                async function invariantCancelledConfirmIsNoOp(card) {
+                    if (typeof card.handleImportClick !== "function") {
+                        assert(
+                            false,
+                            "IMP-01: a cancelled confirm() in handleImportClick() performs neither fetch nor merge (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        seedEditorStateFromFixture(card, FIXTURE_MAP_CONFIG);
+                        card.mapConfig = FIXTURE_MAP_CONFIG;
+                        const beforeEditorState = JSON.stringify(
+                            card.editorState,
+                        );
+                        const beforeZoneMeta = JSON.stringify(card.zoneMeta);
+                        const beforeMapConfig = JSON.stringify(
+                            card.mapConfig,
+                        );
+                        const beforeGlobalZoneMeta = JSON.stringify(
+                            card.globalZoneMeta,
+                        );
+                        await withStubbedConfirm(false, () =>
+                            card.handleImportClick(),
+                        );
+                        const unchanged =
+                            beforeEditorState ===
+                                JSON.stringify(card.editorState) &&
+                            beforeZoneMeta === JSON.stringify(card.zoneMeta) &&
+                            beforeMapConfig ===
+                                JSON.stringify(card.mapConfig) &&
+                            beforeGlobalZoneMeta ===
+                                JSON.stringify(card.globalZoneMeta);
+                        assert(
+                            unchanged,
+                            "IMP-01: cancelling handleImportClick()'s confirm() changes nothing in editorState/zoneMeta/mapConfig/globalZoneMeta",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `IMP-01: cancelled-confirm no-op check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 2 (IMP-01, RED-baseline until Plan 05-02):
+                // mergeImportedMapConfig() overwrites editorState.interference/
+                // .exit/.edge to freshly-decoded values from the SECOND,
+                // distinct IMPORT_FIXTURE_MAP_CONFIG — not indistinguishable
+                // from a no-op. ---
+                function invariantGlobalGridOverwrite(card) {
+                    if (typeof card.mergeImportedMapConfig !== "function") {
+                        assert(
+                            false,
+                            "IMP-01: mergeImportedMapConfig() overwrites editorState.interference/.exit/.edge from a second, distinct fixture (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        seedEditorStateFromFixture(card, FIXTURE_MAP_CONFIG);
+                        card.mapConfig = IMPORT_FIXTURE_MAP_CONFIG;
+                        card.mergeImportedMapConfig();
+                        const decode = window.FP2Codec.hexToGrid;
+                        const expectedInterference = decode(
+                            IMPORT_FIXTURE_MAP_CONFIG.interference_grid,
+                        );
+                        const expectedExit = decode(
+                            IMPORT_FIXTURE_MAP_CONFIG.exit_grid,
+                        );
+                        const expectedEdge = decode(
+                            IMPORT_FIXTURE_MAP_CONFIG.edge_grid,
+                        );
+                        assert(
+                            JSON.stringify(card.editorState.interference) ===
+                                JSON.stringify(expectedInterference) &&
+                                JSON.stringify(card.editorState.exit) ===
+                                    JSON.stringify(expectedExit) &&
+                                JSON.stringify(card.editorState.edge) ===
+                                    JSON.stringify(expectedEdge),
+                            "IMP-01: mergeImportedMapConfig() overwrites editorState.interference/.exit/.edge to freshly-decoded values from a second, distinct fixture",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `IMP-01: global grid overwrite check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 3 (IMP-02, RED-baseline until Plan 05-02):
+                // an existing device zone's (zone:0) grid + presenceSensitivity
+                // are overwritten from the second fixture; zoneType/
+                // motionTimeoutEnabled/motionTimeoutSeconds reset to
+                // null/false/5 even when explicitly set to non-defaults
+                // immediately before the merge. ---
+                function invariantDeviceZoneOverwriteAndReset(card) {
+                    if (
+                        typeof card.mergeImportedMapConfig !== "function" ||
+                        typeof card.getOrSeedZoneMeta !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "IMP-02: mergeImportedMapConfig() overwrites zone:0's grid+presenceSensitivity and resets zoneType/motionTimeout* to defaults (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        seedEditorStateFromFixture(card, FIXTURE_MAP_CONFIG);
+                        card.mapConfig = FIXTURE_MAP_CONFIG;
+                        const preMeta = card.getOrSeedZoneMeta("zone:0");
+                        preMeta.zoneType = 2;
+                        preMeta.motionTimeoutEnabled = true;
+                        preMeta.motionTimeoutSeconds = 42;
+                        card.mapConfig = IMPORT_FIXTURE_MAP_CONFIG;
+                        card.mergeImportedMapConfig();
+                        const expectedGrid = window.FP2Codec.hexToGrid(
+                            IMPORT_FIXTURE_MAP_CONFIG.zones[0].grid,
+                        );
+                        const postMeta = card.getOrSeedZoneMeta("zone:0");
+                        assert(
+                            JSON.stringify(card.editorState["zone:0"]) ===
+                                JSON.stringify(expectedGrid) &&
+                                postMeta.presenceSensitivity === "low" &&
+                                postMeta.zoneType === null &&
+                                postMeta.motionTimeoutEnabled === false &&
+                                postMeta.motionTimeoutSeconds === 5,
+                            `IMP-02: zone:0's grid/presenceSensitivity overwrite from the second fixture; zoneType/motionTimeoutEnabled/motionTimeoutSeconds reset to null/false/5 (got presenceSensitivity=${postMeta.presenceSensitivity}, zoneType=${postMeta.zoneType}, motionTimeoutEnabled=${postMeta.motionTimeoutEnabled}, motionTimeoutSeconds=${postMeta.motionTimeoutSeconds})`,
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `IMP-02: device zone overwrite+reset check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 4 (IMP-02, RED-baseline until Plan 05-02):
+                // a locally-added zone (zone:new:0) is byte-identical in both
+                // editorState and zoneMeta before and after
+                // mergeImportedMapConfig(). ---
+                function invariantLocalZonePreservation(card) {
+                    if (
+                        typeof card.mergeImportedMapConfig !== "function" ||
+                        typeof card.getOrSeedZoneMeta !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "IMP-02: a locally-added zone:new:0 is byte-identical in editorState+zoneMeta before/after mergeImportedMapConfig() (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        seedEditorStateFromFixture(card, FIXTURE_MAP_CONFIG);
+                        card.mapConfig = FIXTURE_MAP_CONFIG;
+                        const localGrid = Array.from({ length: 14 }, () =>
+                            Array(14).fill(0),
+                        );
+                        localGrid[5][5] = 1;
+                        card.editorState["zone:new:0"] = localGrid;
+                        const localMeta = card.getOrSeedZoneMeta(
+                            "zone:new:0",
+                        );
+                        localMeta.label = "Local Test Zone";
+                        const beforeEditor = JSON.stringify(
+                            card.editorState["zone:new:0"],
+                        );
+                        const beforeMeta = JSON.stringify(localMeta);
+                        card.mapConfig = IMPORT_FIXTURE_MAP_CONFIG;
+                        card.mergeImportedMapConfig();
+                        const afterEditor = JSON.stringify(
+                            card.editorState["zone:new:0"],
+                        );
+                        const afterMeta = JSON.stringify(
+                            card.zoneMeta["zone:new:0"],
+                        );
+                        assert(
+                            beforeEditor === afterEditor &&
+                                beforeMeta === afterMeta,
+                            "IMP-02: a locally-added zone:new:0 stays byte-identical in editorState+zoneMeta across mergeImportedMapConfig()",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `IMP-02: local zone preservation check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 5 (IMP-02, RED-baseline until Plan 05-02):
+                // globalZoneMeta.presenceSensitivity resets to null after a
+                // merge, even when explicitly set to a non-null value
+                // immediately before. ---
+                function invariantGlobalZoneMetaResetsOnMerge(card) {
+                    if (
+                        !card.globalZoneMeta ||
+                        typeof card.mergeImportedMapConfig !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "IMP-02: globalZoneMeta.presenceSensitivity resets to null after mergeImportedMapConfig(), even when set immediately before (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        seedEditorStateFromFixture(card, FIXTURE_MAP_CONFIG);
+                        card.mapConfig = FIXTURE_MAP_CONFIG;
+                        card.globalZoneMeta.presenceSensitivity = "high";
+                        card.mapConfig = IMPORT_FIXTURE_MAP_CONFIG;
+                        card.mergeImportedMapConfig();
+                        assert(
+                            card.globalZoneMeta.presenceSensitivity === null,
+                            `IMP-02: globalZoneMeta.presenceSensitivity resets to null after a merge (got ${card.globalZoneMeta.presenceSensitivity})`,
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `IMP-02: globalZoneMeta reset check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 6 (IMP-02, Pitfall 1, RED-baseline until Plan
+                // 05-02): a device zone-count DECREASE between two fixtures
+                // deletes the now-nonexistent zone:N key from BOTH
+                // editorState and zoneMeta — never silently re-exportable.
+                // FIXTURE has 2 zones, IMPORT_FIXTURE has 1 — merging
+                // IMPORT_FIXTURE over a FIXTURE-seeded card must delete
+                // zone:1. ---
+                function invariantOrphanDeletionOnZoneCountDecrease(card) {
+                    if (
+                        typeof card.mergeImportedMapConfig !== "function" ||
+                        typeof card.getOrSeedZoneMeta !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "IMP-02: a zone-count DECREASE deletes the orphaned zone:N key from both editorState and zoneMeta (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        seedEditorStateFromFixture(card, FIXTURE_MAP_CONFIG);
+                        card.mapConfig = FIXTURE_MAP_CONFIG;
+                        card.getOrSeedZoneMeta("zone:0");
+                        card.getOrSeedZoneMeta("zone:1");
+                        card.mapConfig = IMPORT_FIXTURE_MAP_CONFIG; // 1 zone
+                        card.mergeImportedMapConfig();
+                        assert(
+                            !card.editorState["zone:1"] &&
+                                !card.zoneMeta["zone:1"] &&
+                                !!card.editorState["zone:0"],
+                            "IMP-02: a device zone-count decrease (2 -> 1) deletes the orphaned zone:1 key from both editorState and zoneMeta, keeping zone:0",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `IMP-02: orphan deletion check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 7 (IMP-02, RED-baseline until Plan 05-02):
+                // a device zone-count INCREASE results in
+                // populateLayerSelect()'s <select> gaining the new zone
+                // option after the merge. IMPORT_FIXTURE has 1 zone,
+                // FIXTURE has 2 — merging FIXTURE over an
+                // IMPORT_FIXTURE-seeded card must add the zone:1 option. ---
+                function invariantZoneCountIncreasePickedUp(card) {
+                    if (typeof card.mergeImportedMapConfig !== "function") {
+                        assert(
+                            false,
+                            "IMP-02: a zone-count INCREASE results in the layer <select> gaining the new zone option after the merge (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        seedEditorStateFromFixture(
+                            card,
+                            IMPORT_FIXTURE_MAP_CONFIG,
+                        );
+                        card.mapConfig = IMPORT_FIXTURE_MAP_CONFIG; // 1 zone
+                        card.mergeImportedMapConfig();
+                        card.mapConfig = FIXTURE_MAP_CONFIG; // 2 zones
+                        card.mergeImportedMapConfig();
+                        const select = card.querySelector(".layer-select");
+                        const hasZone1 =
+                            !!select &&
+                            Array.from(select.options).some(
+                                (o) => o.value === "zone:1",
+                            );
+                        assert(
+                            hasZone1,
+                            "IMP-02: a device zone-count increase results in the layer <select> gaining the new zone:1 option after the merge",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `IMP-02: zone-count increase check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 8 (IMP-02): buildExportYaml() omits
+                // global_zone: entirely when
+                // globalZoneMeta.presenceSensitivity === null; emits exactly
+                // global_zone:\n  presence_sensitivity: <value> when set.
+                // GREEN as of this plan's Task 2 (globalZoneMeta + the
+                // only-if-touched export block). ---
+                function invariantGlobalZoneOnlyEmitIfTouched(card) {
+                    if (
+                        !card.globalZoneMeta ||
+                        typeof card.buildExportYaml !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "IMP-02: buildExportYaml() omits global_zone: when unset, emits it with presence_sensitivity when set (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        const original =
+                            card.globalZoneMeta.presenceSensitivity;
+                        card.globalZoneMeta.presenceSensitivity = null;
+                        const untouchedYaml = card.buildExportYaml();
+                        card.globalZoneMeta.presenceSensitivity = "high";
+                        const touchedYaml = card.buildExportYaml();
+                        card.globalZoneMeta.presenceSensitivity = original; // restore
+                        assert(
+                            !untouchedYaml.includes("global_zone:") &&
+                                touchedYaml.includes("global_zone:") &&
+                                touchedYaml.includes(
+                                    "presence_sensitivity: high",
+                                ),
+                            "IMP-02: buildExportYaml() omits global_zone: when globalZoneMeta.presenceSensitivity is null and emits it with the correct value when set",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `IMP-02: global_zone only-emit-if-touched check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 9 (V5, RED-baseline until Plan 05-02): the
+                // merged data follows the same defensive-parse-never-throw
+                // discipline as the initial load (Array.isArray guards); a
+                // malformed/truncated re-fetch response never throws or
+                // leaves editorState half-mutated. ---
+                function invariantMalformedResponseNeverThrows(card) {
+                    if (typeof card.mergeImportedMapConfig !== "function") {
+                        assert(
+                            false,
+                            "V5: a malformed/truncated re-fetch response never throws or leaves editorState half-mutated (not yet implemented)",
+                        );
+                        return;
+                    }
+                    try {
+                        seedEditorStateFromFixture(card, FIXTURE_MAP_CONFIG);
+                        card.mapConfig = {
+                            // Deliberately malformed: null/wrong-type grids,
+                            // zones not an array.
+                            interference_grid: null,
+                            exit_grid: "not-hex-data!!",
+                            edge_grid: undefined,
+                            zones: "not-an-array",
+                        };
+                        let threw = false;
+                        try {
+                            card.mergeImportedMapConfig();
+                        } catch (inner) {
+                            threw = true;
+                        }
+                        const stillValid =
+                            Array.isArray(card.editorState.interference) &&
+                            Array.isArray(card.editorState.exit) &&
+                            Array.isArray(card.editorState.edge);
+                        assert(
+                            !threw && stillValid,
+                            "V5: mergeImportedMapConfig() never throws on a malformed/truncated response and leaves editorState in a valid (never half-mutated) shape",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `V5: malformed-response check threw: ${e.message}`,
+                        );
+                    }
+                }
+
+                // --- Invariant 10 (RED-baseline until Plan 05-02):
+                // window.alert() (or equivalent notice) fires only AFTER
+                // mergeImportedMapConfig() has actually run — never
+                // optimistically before the merge. ---
+                async function invariantConfirmFetchMergeNotifyOrdering(
+                    card,
+                ) {
+                    if (
+                        typeof card.handleImportClick !== "function" ||
+                        typeof card.mergeImportedMapConfig !== "function"
+                    ) {
+                        assert(
+                            false,
+                            "Confirm-then-fetch-then-merge-then-notify: window.alert() fires only after mergeImportedMapConfig() has actually run (not yet implemented)",
+                        );
+                        return;
+                    }
+                    const originalAlert = window.alert;
+                    const originalMerge =
+                        card.mergeImportedMapConfig.bind(card);
+                    let mergeRanBeforeAlert = false;
+                    let mergeHasRun = false;
+                    window.alert = () => {
+                        mergeRanBeforeAlert = mergeHasRun;
+                    };
+                    card.mergeImportedMapConfig = function (...args) {
+                        const result = originalMerge(...args);
+                        mergeHasRun = true;
+                        return result;
+                    };
+                    try {
+                        seedEditorStateFromFixture(card, FIXTURE_MAP_CONFIG);
+                        card.mapConfig = IMPORT_FIXTURE_MAP_CONFIG;
+                        await withStubbedConfirm(true, () =>
+                            card.handleImportClick(),
+                        );
+                        assert(
+                            mergeHasRun && mergeRanBeforeAlert,
+                            "Confirm-then-fetch-then-merge-then-notify: window.alert() only fires after mergeImportedMapConfig() has actually run",
+                        );
+                    } catch (e) {
+                        assert(
+                            false,
+                            `Confirm-then-fetch-then-merge-then-notify: ordering check threw: ${e.message}`,
+                        );
+                    } finally {
+                        window.alert = originalAlert;
+                        card.mergeImportedMapConfig = originalMerge;
+                    }
+                }
+
+                function renderSummary() {
+                    const summary = document.createElement("div");
+                    summary.className = "fp2-result-summary";
+                    summary.textContent = `${passCount} passed, ${failCount} failed`;
+                    panel.appendChild(summary);
+                    console.log(
+                        `[FP2 Card] Import suite: ${passCount} passed, ${failCount} failed`,
+                    );
+                }
+
+                async function runImportSuite() {
+                    panel.innerHTML = "";
+
+                    try {
+                        const card = getImportTestCard();
+                        await invariantCancelledConfirmIsNoOp(card);
+                        invariantGlobalGridOverwrite(card);
+                        invariantDeviceZoneOverwriteAndReset(card);
+                        invariantLocalZonePreservation(card);
+                        invariantGlobalZoneMetaResetsOnMerge(card);
+                        invariantOrphanDeletionOnZoneCountDecrease(card);
+                        invariantZoneCountIncreasePickedUp(card);
+                        invariantGlobalZoneOnlyEmitIfTouched(card);
+                        invariantMalformedResponseNeverThrows(card);
+                        await invariantConfirmFetchMergeNotifyOrdering(card);
+                    } catch (e) {
+                        assert(
+                            false,
+                            `Import suite crashed unexpectedly: ${e.message}`,
+                        );
+                        console.error(
+                            `[FP2 Card] Import suite uncaught exception:`,
+                            e,
+                        );
+                    }
+
+                    renderSummary();
+                }
+
+                window.runImportSuite = runImportSuite;
+                runImportSuite();
+            })();
+        </script>
     </body>
 </html>

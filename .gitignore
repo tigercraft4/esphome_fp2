@@ -22,3 +22,6 @@ IMPLEMENTATION_SUMMARY.md
 VISUAL_MAP.md
 
 secrets.yaml
+
+# GSD planning docs (local-only)
+.planning/

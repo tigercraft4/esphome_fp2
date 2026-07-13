@@ -189,6 +189,21 @@ type: module
 | `map_config_service` | string | derived from `entity_prefix` | Override the ESPHome map-config service name |
 | `targets_entity` | string | derived from `entity_prefix` | Override the target-tracking text sensor entity |
 
+### Zone & Grid Editor
+
+![Zone editor screenshot](images/card_editor_screenshot.png)
+
+Paint zones and grids directly on the live radar view and export them as ready-to-paste YAML — no more hand-editing 14×14 ASCII grids.
+
+1. **Enter edit mode** - click **Edit** in the card header (pencil icon) to switch the canvas to the full 14×14 grid and reveal the editor toolbar. Click **Done** to exit edit mode.
+2. **Select a layer** - use the **Layer** dropdown to choose what you're editing: `Interference Grid`, `Exit Grid`, `Edge Grid`, or any zone (device zones and locally-added zones both appear in the list).
+3. **Paint / erase** - with **Paint** active, click and drag on the grid to fill cells on the selected layer. Hold Shift or right-click while dragging to erase, no matter which mode is currently selected. **Clear Layer** wipes the selected layer's grid in one step.
+4. **Add / remove zones** - click **+ Add Zone** to create a new local-only zone; it appears in the Layer dropdown as `Zone N`. Select a locally-added zone and click **Remove Zone** to delete it — **Remove Zone** is only shown for locally-added zones, not for zones read from the device.
+5. **Set per-zone controls** - with a zone selected in the Layer dropdown, the **Zone** panel below the toolbar lets you set its label (locally-added zones only; device zone labels are read-only), **Type** (`zone_type`), **Sensitivity** (`presence_sensitivity`: Low/Medium/High), and an optional **Motion timeout** checkbox plus a seconds field.
+6. **Set the Global Zone sensitivity (optional)** - the standalone **Global Zone** dropdown in the toolbar sets a card-wide `global_zone.presence_sensitivity`. Leave it on `-- not set --` to omit the `global_zone:` block from the export entirely.
+7. **Export YAML** - click **Export YAML** to build a `zones:`/global-grid YAML block from your current edits. If the grids look suspicious (e.g. empty), you'll see a confirmation warning first. The result is copied to your clipboard when possible, and is always shown in a read-only text box below the toolbar as a fallback — paste it directly under your existing `aqara_fp2:` block (no extra wrapper key needed).
+8. **Import from Device** - click **Import from Device** to re-fetch the sensor's current configuration and merge it into the editor. After you confirm, this overwrites the global grids and every existing device zone's grid/sensitivity with what the device currently reports, while keeping any locally-added zones untouched. Because the device can't report `zone_type`, `motion_timeout`, or the Global Zone sensitivity, those are reset to their defaults on every Import — re-set them before exporting again if you need them.
+
 ---
 
 ## Project Structure
