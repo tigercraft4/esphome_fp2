@@ -149,12 +149,14 @@ physical access to a `fp2-sala`-class device to run and record the result.
 
 ## 5. Go/No-Go Recommendation
 
-**CONDITIONAL GO.**
+**GO — scoped as an ephemeral live-preview write, not a verified persistent
+save.**
 
 **Reasons to proceed:**
 1. The write primitive is already proven live in production
    (`configure_sleep_mode`, shipped as `fp2_configure_sleep_mode`) — not new,
-   risky ground.
+   risky ground. §6 reconfirmed it directly: every `fp2_write_attr_uint8`
+   call ACKed immediately, 2/2.
 2. The transport pattern (ESPHome native `api: actions:` → `FP2Component`
    method) is proven by five existing actions, requires no new architecture,
    no MQTT, and no firmware framework changes.
@@ -162,32 +164,39 @@ physical access to a `fp2-sala`-class device to run and record the result.
    lowest-risk slice of `RUN-01` — doesn't need the riskiest part of the
    sequence (rebuilding the activation list).
 
-**What "conditional" means:**
-1. **Persistence is unknown, and — per §6's manual test results — currently
-   unanswerable.** Neither `fp2_read_attr` (radar never answers a
-   host-initiated read) nor `get_map_config` (never queries the radar; it
-   just echoes the compiled YAML) can confirm what value is actually live
-   on the device, before or after a reboot. If registers turn out to be
-   volatile, `RUN-01` needs an additional shadow-copy/re-apply layer to
-   survive radar-only resets — meaningfully more scope than a simple
-   write-and-forget action. Resolving this needs either a firmware-side fix
-   to the read path or a fallback to indirect behavioral verification.
-2. **No atomic commit / no rollback / no read-back** in the existing
-   command queue means `RUN-01` must build its own success/failure feedback
-   loop back to the card UI relying on ACK-of-write alone (confirmed the
-   only reliable signal in §6) — real engineering work with no existing
-   precedent to lean on (every existing action is fire-and-forget with no
-   response payload, and reads don't work).
-3. **Adding/removing a zone live is meaningfully riskier** than editing an
-   existing one, since it requires new live-side zone-ID bookkeeping this
-   codebase doesn't have today (`zones_` is populated once, at compile time,
-   and never mutated at runtime).
+**Resolution on persistence/read-back (decided 2026-07-14):** §6 established
+that no read-back path currently works — `fp2_read_attr` never gets a
+response (5/5 attempts) and `get_map_config` never queries the radar in the
+first place. Rather than block `RUN-01` on fixing that (firmware-level
+investigation, no clear path forward, see §6's discrepancy against the
+reverse-engineering reference), `RUN-01` drops the read-back/persistence
+requirement entirely:
+- **Success signal is ACK-of-write, full stop.** No read-back, no
+  persistence check, no "confirmed on device" state in the UI — only
+  "sent."
+- **The write is explicitly ephemeral**, matching what §2/§7 already say
+  about `check_initialization_()` re-pushing the compiled config on every
+  boot: a live write is a *preview*, not a *save*. The UI must communicate
+  this plainly (e.g. "applied until next reboot — export + reflash to keep
+  it") — export-and-reflash, already shipped, remains the durable path for
+  anything the user wants to keep.
+- This sidesteps Risk 2 (no atomic commit / no rollback) entirely — there's
+  nothing to roll back to verify in the first place, so the feedback loop
+  is just the existing ACK/timeout the command queue already reports today.
+- Fixing the underlying read failure (UART sniffing between ESP32 and
+  radar, or further firmware reverse-engineering) is out of scope for
+  `RUN-01` and left as a separate, unscheduled follow-up if true
+  persistence verification is ever required.
+
+**Remaining risk carried forward:** adding/removing a zone live is still
+meaningfully riskier than editing an existing one — it requires new
+live-side zone-ID bookkeeping this codebase doesn't have today (`zones_` is
+populated once, at compile time, and never mutated at runtime).
 
 **Recommended `RUN-01` scoping:** start with "edit an existing compiled
-zone's grid/sensitivity/type live," explicitly deferring "add/remove a zone
-live" to a later increment. Require the §4 persistence test to be run and
-its result recorded here before committing engineering time to that
-milestone's plan.
+zone's grid/sensitivity/type live," write-and-forget with ACK as the only
+success signal, explicitly labeled ephemeral in the UI. Defer "add/remove a
+zone live" to a later increment.
 
 ## 6. Manual Follow-Up: Persistence Test Result
 
