@@ -163,6 +163,13 @@ void FP2Component::setup() {
   // Reset internal state
   waiting_for_ack_attr_id_ = AttrId::INVALID;
 
+  // check_initialization_() always boots into WORK_MODE=3 (Zone Detection);
+  // reflect that compiled default in the select immediately so it doesn't
+  // show "unknown" until the user first interacts with it.
+  if (this->operating_mode_select_ != nullptr) {
+    this->operating_mode_select_->publish_state(OPERATING_MODE_ZONE_DETECTION);
+  }
+
   // GPIO Reset
   perform_reset_();
 }
