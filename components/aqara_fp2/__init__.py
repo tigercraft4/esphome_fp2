@@ -18,6 +18,7 @@ from esphome.const import (
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_OCCUPANCY,
     DEVICE_CLASS_MOTION,
+    DEVICE_CLASS_SAFETY,
     STATE_CLASS_MEASUREMENT,
     ENTITY_CATEGORY_DIAGNOSTIC,
     UNIT_CELSIUS,
@@ -76,6 +77,7 @@ CONF_WALKING_DISTANCE = "walking_distance"
 CONF_SLEEP_DATA = "sleep_data"
 CONF_SLEEP_PRESENCE = "sleep_presence"
 CONF_SLEEP_INOUT_STATE = "sleep_inout_state"
+CONF_FALL_DETECTED = "fall_detected"
 CONF_SLEEP_STATE = "sleep_state"
 CONF_SLEEP_EVENT = "sleep_event"
 CONF_TARGET_POSTURE = "target_posture"
@@ -301,6 +303,10 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_SLEEP_INOUT_STATE): binary_sensor.binary_sensor_schema(
                 icon="mdi:bed",
             ),
+            cv.Optional(CONF_FALL_DETECTED): binary_sensor.binary_sensor_schema(
+                device_class=DEVICE_CLASS_SAFETY,
+                icon="mdi:human-cane",
+            ),
             cv.Optional(CONF_SLEEP_DATA): text_sensor_.text_sensor_schema(
                 icon="mdi:sleep",
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -341,6 +347,7 @@ SENSOR_MAP = {
     CONF_PEOPLE_COUNTING: (text_sensor_.new_text_sensor, "set_people_counting_sensor"),
     CONF_SLEEP_PRESENCE: (binary_sensor.new_binary_sensor, "set_sleep_presence_sensor"),
     CONF_SLEEP_INOUT_STATE: (binary_sensor.new_binary_sensor, "set_sleep_inout_sensor"),
+    CONF_FALL_DETECTED: (binary_sensor.new_binary_sensor, "set_fall_detected_sensor"),
     CONF_LOCATION_REPORT_SWITCH: (switch.new_switch, "set_location_report_switch"),
     CONF_TARGET_TRACKING: (text_sensor_.new_text_sensor, "set_target_tracking_sensor"),
 
