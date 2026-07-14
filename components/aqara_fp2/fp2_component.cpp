@@ -161,7 +161,6 @@ void FP2Component::setup() {
 
   // Reset internal state
   waiting_for_ack_attr_id_ = AttrId::INVALID;
-  waiting_for_response_attr_id_ = AttrId::INVALID;
 
   // GPIO Reset
   perform_reset_();
@@ -170,7 +169,6 @@ void FP2Component::setup() {
 void FP2Component::perform_reset_() {
   command_queue_.clear();
   waiting_for_ack_attr_id_ = AttrId::INVALID;
-  waiting_for_response_attr_id_ = AttrId::INVALID;
   init_done_ = false;
   last_radar_frame_millis_ = 0;
   last_heartbeat_millis_ = 0;
@@ -571,20 +569,6 @@ void FP2Component::process_command_queue_() {
     return; // Still waiting
   }
 
-  if (waiting_for_response_attr_id_ != AttrId::INVALID) {
-    if (now - last_command_sent_millis_ > READ_TIMEOUT_MS) {
-      if (!command_queue_.empty()) {
-        auto &cmd = command_queue_.front();
-        ESP_LOGD(TAG, "Read %s (0x%04X) timed out. Dropping.",
-                 attr_id_to_string_(cmd.attr_id), (uint16_t) cmd.attr_id);
-        publish_radar_debug_("command_read_timeout", cmd.attr_id, cmd.data);
-        command_queue_.pop_front();
-      }
-      waiting_for_response_attr_id_ = AttrId::INVALID;
-    }
-    return;
-  }
-
   // Not waiting, send next
   if (!command_queue_.empty()) {
     send_next_command_();
@@ -623,7 +607,7 @@ void FP2Component::write_command_frame_(const FP2Command &cmd, bool track_timeou
   write_array(frame);
   if (track_timeout) {
     last_command_sent_millis_ = millis();
-    publish_radar_debug_(cmd.type == OpCode::READ ? "command_tx_read" : "command_tx_write",
+    publish_radar_debug_(cmd.type == OpCode::RESPONSE ? "command_tx_read" : "command_tx_write",
                          cmd.attr_id, cmd.data);
   }
   ESP_LOGD(TAG, "Sending %s %s (0x%04X), len=%u data=%s",
@@ -637,14 +621,14 @@ void FP2Component::send_next_command_() {
     return;
 
   auto &cmd = command_queue_.front();
-  write_command_frame_(cmd, cmd.type == OpCode::WRITE || cmd.type == OpCode::READ);
+  write_command_frame_(cmd, cmd.type == OpCode::WRITE || cmd.type == OpCode::RESPONSE);
 
-  // WRITE commands expect ACK. Host-initiated READ commands expect RESPONSE.
-  // ACK and reverse-read response packets do not get ACKed.
+  // WRITE commands expect ACK. Host-initiated reads (OpCode::RESPONSE, wire
+  // 0x01) are fire-and-forget per PROTO-01 — the radar's answer, if any,
+  // arrives asynchronously as its own RESPONSE frame and is purely
+  // observational (see handle_response_); it does not gate this queue.
   if (cmd.type == OpCode::WRITE) {
     waiting_for_ack_attr_id_ = cmd.attr_id;
-  } else if (cmd.type == OpCode::READ) {
-    waiting_for_response_attr_id_ = cmd.attr_id;
   } else {
     command_queue_.pop_front();
   }
@@ -1247,19 +1231,12 @@ void FP2Component::handle_response_(AttrId attr_id, const std::vector<uint8_t> &
   if (payload.size() == 2) {
     handle_reverse_read_request_(attr_id);
   } else {
+    // PROTO-01: host reads are fire-and-forget (see enqueue_read_), so this
+    // is purely observational — there is no wait state to match/clear here.
     publish_radar_debug_("radar_response", attr_id, payload);
     ESP_LOGD(TAG, "Received Response for 0x%04X (%s) with %u bytes",
              (uint16_t) attr_id, attr_id_to_string_(attr_id),
              static_cast<unsigned>(payload.size()));
-    if (waiting_for_response_attr_id_ == attr_id) {
-      waiting_for_response_attr_id_ = AttrId::INVALID;
-      if (!command_queue_.empty()) {
-        command_queue_.pop_front();
-      }
-    } else if (waiting_for_response_attr_id_ != AttrId::INVALID) {
-      ESP_LOGW(TAG, "Unexpected response 0x%04X (Waiting for 0x%04X)",
-               (uint16_t) attr_id, (uint16_t) waiting_for_response_attr_id_);
-    }
   }
 }
 
@@ -1381,7 +1358,10 @@ void FP2Component::enqueue_command_blob2_(
 
 void FP2Component::enqueue_read_(AttrId attr_id) {
     FP2Command cmd;
-    cmd.type = OpCode::READ;
+    // PROTO-01: host-initiated reads are OpCode::RESPONSE (wire 0x01), not
+    // OpCode::READ (wire 0x04, which is the radar's inbound response opcode).
+    // Fire-and-forget: send_next_command_() pops it immediately, no wait state.
+    cmd.type = OpCode::RESPONSE;
     cmd.attr_id = attr_id;
     cmd.retry_count = 0;
 

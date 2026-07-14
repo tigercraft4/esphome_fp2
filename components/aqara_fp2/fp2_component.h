@@ -537,10 +537,8 @@ protected:
   // We track the SubID of tAttrId::INVALID command we are currently waiting for an ACK for.
   // 0xFFFF = Not waiting.
   AttrId waiting_for_ack_attr_id_{AttrId::INVALID};
-  AttrId waiting_for_response_attr_id_{AttrId::INVALID};
   uint32_t last_command_sent_millis_{0};
   static const uint32_t ACK_TIMEOUT_MS = 500;
-  static const uint32_t READ_TIMEOUT_MS = 500;
   static const uint8_t MAX_RETRIES = 3;
 
   void enqueue_command_(OpCode type, AttrId attr_id, uint8_t byte_val);
