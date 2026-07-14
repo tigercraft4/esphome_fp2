@@ -434,6 +434,7 @@ public:
       fall_overtime_sensor_ = sensor;
   }
   void set_debug_probe_reads(bool enabled) { debug_probe_reads_ = enabled; }
+  void set_debug_mode(bool enabled) { debug_mode_ = enabled; }
 
   void set_fp2_accel(aqara_fp2_accel::AqaraFP2Accel *accel) {
       fp2_accel_ = accel;
@@ -574,6 +575,7 @@ protected:
   binary_sensor::BinarySensor *fall_detected_sensor_{nullptr};
   binary_sensor::BinarySensor *fall_overtime_sensor_{nullptr};
   bool debug_probe_reads_{false};
+  bool debug_mode_{false};
 
   // Map Configuration (compile-time generated)
   std::string map_config_json_;

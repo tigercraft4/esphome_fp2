@@ -677,6 +677,9 @@ void FP2Component::write_command_frame_(const FP2Command &cmd, bool track_timeou
   frame.push_back((crc >> 8) & 0xFF);
 
   write_array(frame);
+  if (debug_mode_) {
+    ESP_LOGD(TAG, "[debug_mode] TX frame: %s", format_payload_hex_(frame, frame.size()).c_str());
+  }
   if (track_timeout) {
     last_command_sent_millis_ = millis();
     publish_radar_debug_(cmd.type == OpCode::RESPONSE ? "command_tx_read" : "command_tx_write",
@@ -849,6 +852,12 @@ void FP2Component::handle_parsed_frame_(uint8_t type, AttrId attr_id,
   ESP_LOGV(TAG, "Received %s %s (0x%04X), len=%u",
            op_code_to_string_(type), attr_id_to_string_(attr_id),
            (uint16_t) attr_id, static_cast<unsigned>(payload.size()));
+  if (debug_mode_) {
+    ESP_LOGD(TAG, "[debug_mode] RX op=%s attr=0x%04X len=%u data=%s",
+             op_code_to_string_(type), (uint16_t) attr_id,
+             static_cast<unsigned>(payload.size()),
+             format_payload_hex_(payload, payload.size()).c_str());
+  }
 
   switch (op) {
     case OpCode::ACK:
