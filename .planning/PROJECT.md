@@ -10,6 +10,22 @@ A user can draw a zone by painting cells on the grid and get a valid `zones:` YA
 
 **Shipped in v1.0** — confirmed end-to-end by the milestone's integration audit: paint → export produces byte-exact, `parse_ascii_grid`-compatible YAML.
 
+## Current Milestone: v1.1 Runtime Save-to-Sensor
+
+**Goal:** A user can push an edited zone/global-zone straight from the card to the live device and have it survive a reboot without reflashing — on top of a corrected, more complete protocol layer ported from a more mature sibling fork.
+
+**Target features:**
+- **Protocol fix:** host-initiated reads (`fp2_read_attr`) use the correct wire opcode (`0x01` request / `0x04` response, fire-and-forget) instead of the wrong one this codebase shipped with — resolves the Phase 6 spike's 5/5 reproducible read timeouts
+- Sleep-mode `0x0203` heartbeat keepalive; corrected fall-detection SubID mapping (`0x0121`/`0x0179`/`0x0180`)
+- New sensors: per-zone people count (`ZONE_PEOPLE_NUMBER`), `FALL_OVERTIME_REPORT`
+- Diagnostics: `debug_mode` verbose logging, optional telnet raw-UART bridge (default off)
+- Live write path for editing an existing compiled zone's grid/sensitivity/type (proven mechanics: `enqueue_command_blob2_`, `fp2_write_attr_uint8`, ACK-confirmed) plus the Global Zone
+- ESP32-side NVS persistence layer (ESPHome `preferences`) so `check_initialization_()` re-applies the last-saved override on every boot, independent of whatever the radar itself does or doesn't remember
+- Card UI "Save to Sensor" action that honestly reflects confirmation level — real read-back-confirmed if the protocol fix restores working reads, "applied, not verified" otherwise
+- Explicitly deferred: adding/removing a zone live (needs new zone-ID bookkeeping the codebase doesn't have); radar OTA / firmware-image switching (EXPERIMENTAL even upstream, real bricking risk — see `REQUIREMENTS.md` Out of Scope)
+
+**Key context:** `SAVE_TO_SENSOR_FEASIBILITY.md` (Phase 6 spike, updated 2026-07-14) is the authority for the runtime-write background. Mid-milestone, comparing against `github.com/JameZUK/esphome_fp2_ng` (a more mature sibling fork sharing our common ancestor, `hansihe/esphome_fp2`) found the actual root cause of the read timeouts: our `enqueue_read_` sends wire opcode `0x04` (which the firmware only treats as a *reverse-read response*), when the correct host-initiated read request is opcode `0x01` — their fork does exactly this, fire-and-forget, and its inbound `0x04` handling matches what our dispatcher already does. This is a bug fix, not a hardware limitation as the spike doc first concluded; once fixed, real read-back verification becomes possible, so `RUN-03`'s UI-honesty requirement adapts to whichever confirmation level the protocol actually supports rather than assuming the worst case. The same comparison surfaced several smaller correctness fixes and new sensors, folded into this milestone's `PROTO-*`/`SENSE-*`/`DIAG-*` requirements; their `operating_mode`/radar-OTA subsystem was evaluated and explicitly excluded as too risky (their own repo marks it EXPERIMENTAL/untested).
+
 ## Requirements
 
 ### Validated
@@ -32,16 +48,20 @@ A user can draw a zone by painting cells on the grid and get a valid `zones:` YA
 
 ### Active
 
-<!-- Next milestone candidates. -->
+<!-- v1.1 milestone — see REQUIREMENTS.md for full text. -->
 
-- [ ] `RUN-01`: full runtime "Save to Sensor" feature (HA action taking a grid → radar write, persistence across resets, card button) — gated on running the Phase 6 spike's deferred reboot-persistence test; `SAVE_TO_SENSOR_FEASIBILITY.md` recommends scoping v1 to "edit existing compiled zones only," deferring live zone addition
+- [ ] `PROTO-01..03`: protocol correctness fixes (host-read opcode bug, sleep-mode keepalive, fall-detection SubID mapping) ported from comparison against `JameZUK/esphome_fp2_ng`
+- [ ] `SENSE-01..02`: new sensors (`ZONE_PEOPLE_NUMBER`, `FALL_OVERTIME_REPORT`)
+- [ ] `DIAG-01..02`: `debug_mode` flag + optional telnet raw-UART diagnostic bridge (default off)
+- [ ] `RUN-01..04`: runtime "Save to Sensor" for an *existing compiled* zone/global-zone — live write + ESP32 NVS persistence so the override survives reboot without a reflash, UI honest about confirmation level
 - [ ] Capture and commit `images/card_editor_screenshot.png` (README reference exists, image doesn't yet — no headless browser in the dev environment that shipped v1.0)
 - [ ] Run the Phase 3 GEOM-03 real-device empirical confirmation (`left_right_reverse`/corner-mount mapping) against a physical FP2
 
 ### Out of Scope
 
-- MQTT on the FP2 — card already talks to the device over the native ESPHome API inside HA; a broker adds dependency/config/security surface with no benefit (even for the future runtime write path)
-- Full runtime "Save to Sensor" feature (entry-point + persistence + card button) — deferred until the export-only editor is proven; v1.0's Phase 6 spiked feasibility only (conditional GO), full feature is `RUN-01` for a future milestone
+- MQTT on the FP2 — card already talks to the device over the native ESPHome API inside HA; a broker adds dependency/config/security surface with no benefit (even for the runtime write path)
+- Adding/removing a zone live — requires new live-side zone-ID bookkeeping (`zones_` is populated once at compile time, never mutated at runtime); `RUN-01` is scoped to editing already-compiled zones only
+- Protocol-level read-back / persistence verification — confirmed non-functional on real hardware (`SAVE_TO_SENSOR_FEASIBILITY.md` §6); `RUN-01` relies on ACK-of-write + ESP32-side NVS instead of ever reading the radar back
 - Polygon / freehand-vector zones — FP2 zones are grid bitmasks; rectangle/paint on the grid is sufficient
 - Multi-room storage / server backend (the SHS tool's Express+JSON layer) — the card is self-contained in HA
 - Automatic furniture→interference inference — the existing "Auto Interference Detection" button covers this
@@ -57,7 +77,7 @@ A user can draw a zone by painting cells on the grid and get a valid `zones:` YA
 - **Verification surface:** `fp2-card-test.html` was the primary dev/test loop for all 6 phases — grew to 5 hand-rolled suites (round-trip, editor, painting&geometry, export&zone-controls, import) with 34+ invariants, zero test framework, zero HA/device dependency to iterate.
 - **Live-readback protocol gap (discovered in Phase 4/5):** `get_map_config` only ever returns `{sensitivity, grid, presence_sensor?}` per zone — `zone_type`, `motion_timeout`, and `global_zone` are compile-time-only and never round-trip back to the card. Import must reset these to defaults every session, surfaced to the user via a one-time alert.
 - **Geometry double-mirror risk (Phase 3's central concern, confirmed real in code review across Phases 3-5):** every phase that renders both a painted grid and a live overlay must apply `left_right_reverse`'s column mirror through the single centralized `window.FP2Geometry` module — code review caught and fixed 3 separate instances of this exact bug class (hover-preview, zoomed-crop bounds, local-zone selection outline) across the milestone, confirming this was the right risk to prioritize.
-- **Save-to-Sensor feasibility (Phase 6):** the runtime write primitive (`enqueue_command_blob2_` writing `ZONE_MAP`) is already proven live via the existing `fp2_configure_sleep_mode` action — conditional GO for a future `RUN-01`, gated on a reboot-persistence test that requires physical hardware not available during v1.0's development. See `SAVE_TO_SENSOR_FEASIBILITY.md`.
+- **Save-to-Sensor feasibility (Phase 6, resolved 2026-07-14):** the runtime write primitive (`enqueue_command_blob2_`/`fp2_write_attr_uint8`) is proven live and reliable (ACK every attempt, real device). The reboot-persistence question turned out to be unanswerable at the protocol level — `fp2_read_attr` never gets a response (5/5 timeouts) and `get_map_config` never queries the radar at all. Resolution: `RUN-01` drops protocol-level verification entirely and uses ESP32-side NVS (`preferences`) as the durable store instead, sidestepping the radar's own persistence behavior altogether. See `SAVE_TO_SENSOR_FEASIBILITY.md` §5/§6.
 - **Known codebase concerns from v1.0's start** (see `.planning/codebase/CONCERNS.md`): grid round-trip had no tests, `parse_ascii_grid` offset mapping was undocumented and fragile — both resolved by Phase 1's byte-exact `FP2Codec` + round-trip suite.
 
 ## Constraints
@@ -98,4 +118,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-13 after v1.0 milestone*
+*Last updated: 2026-07-14 — v1.1 Runtime Save-to-Sensor milestone started*
