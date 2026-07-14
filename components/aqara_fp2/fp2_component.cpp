@@ -314,22 +314,37 @@ void FP2Component::configure_sleep_mode(uint16_t width, uint16_t length, uint8_t
     location_report_switch_->publish_state(true);
   }
 
+  // PROTO-02b (real-hardware finding, 2026-07-14): SLEEP_ZONE_SIZE and
+  // SLEEP_MOUNT_POSITION must be queued and ACKed BEFORE the WORK_MODE=9
+  // write. Per the reference fork (JameZUK/esphome_fp2_ng
+  // set_operating_mode()), the WORK_MODE write triggers a radar-side
+  // flash-save + self-restart into FW3 (Sleep/Vitals firmware); any
+  // parameter written after that point arrives too late to be captured by
+  // the flash save. FW3 then boots with no valid zone geometry, GTrack
+  // never allocates a track, and the radar goes spontaneous-report-silent
+  // (no heartbeat, no vitals) while still answering direct reads — exactly
+  // the failure observed live on fp2-sala. This block was previously
+  // ordered AFTER WORK_MODE=9 (a pre-existing bug predating PROTO-02, not
+  // introduced by it) and is corrected here to match the reference fork's
+  // write order.
   enqueue_command_(OpCode::WRITE, AttrId::SLEEP_REPORT_ENABLE, true);
   enqueue_command_blob2_(AttrId::ZONE_MAP, empty_zone);
-  enqueue_command_(OpCode::WRITE, AttrId::WORK_MODE, (uint8_t) 9);
-
-  // PROTO-02: seed the heartbeat keepalive on sleep-mode entry. Reset the
-  // counter and send one immediate 0x0203=0 sync, matching the reference
-  // fork's behavior; subsequent writes are piggybacked on each inbound
-  // RADAR_SW_VERSION heartbeat (see handle_report_()).
-  sleep_mode_active_ = true;
-  sleep_heartbeat_counter_ = 0;
-  enqueue_command_(OpCode::WRITE, AttrId::SLEEP_HEARTBEAT_SYNC, (uint8_t) 0);
-
   enqueue_command_blob2_(AttrId::ZONE_MAP, empty_zone);
   enqueue_command_(OpCode::WRITE, AttrId::LOCATION_REPORT_ENABLE, true);
   enqueue_command_(OpCode::WRITE, AttrId::SLEEP_ZONE_SIZE, zone_size);
   enqueue_command_(OpCode::WRITE, AttrId::SLEEP_MOUNT_POSITION, mount_position);
+
+  enqueue_command_(OpCode::WRITE, AttrId::WORK_MODE, (uint8_t) 9);
+
+  // PROTO-02: seed the heartbeat keepalive on sleep-mode entry. Safe to
+  // leave after WORK_MODE=9 even if the radar restarts immediately — this
+  // write is NOT part of the flash-saved config; it is a live protocol
+  // keepalive re-primed every heartbeat via handle_report_(), so a dropped
+  // seed write is harmless (the first post-restart heartbeat continues the
+  // sequence from sleep_heartbeat_counter_ = 0 regardless).
+  sleep_mode_active_ = true;
+  sleep_heartbeat_counter_ = 0;
+  enqueue_command_(OpCode::WRITE, AttrId::SLEEP_HEARTBEAT_SYNC, (uint8_t) 0);
 }
 
 void FP2Component::set_work_mode(uint8_t mode) {
