@@ -674,6 +674,12 @@ void FP2Component::process_command_queue_() {
           ESP_LOGW(TAG, "Command 0x%04X timed out after %d retries. Dropping.",
                    (uint16_t) cmd.attr_id, MAX_RETRIES);
           publish_radar_debug_("command_ack_failed", cmd.attr_id, cmd.data);
+          // RUN-04 (09-01): one failed register fails the whole save batch.
+          if (!pending_save_attr_ids_.empty()) {
+            save_failed_ = true;
+            save_error_ = std::string("timed out writing ") + attr_id_to_string_(cmd.attr_id);
+            pending_save_attr_ids_.clear();
+          }
           command_queue_.pop_front();
           waiting_for_ack_attr_id_ = AttrId::INVALID;
         } else {
@@ -959,6 +965,10 @@ void FP2Component::handle_ack_(AttrId attr_id) {
     if (!command_queue_.empty()) {
       command_queue_.pop_front();
     }
+    // RUN-04 (09-01): remove this attr from the pending-save batch, if present.
+    pending_save_attr_ids_.erase(
+        std::remove(pending_save_attr_ids_.begin(), pending_save_attr_ids_.end(), attr_id),
+        pending_save_attr_ids_.end());
   } else {
     ESP_LOGW(TAG, "Unexpected ACK 0x%04X (Waiting for 0x%04X)", attr_id,
              (uint16_t) waiting_for_ack_attr_id_);

@@ -470,6 +470,17 @@ public:
   JsonDocument get_map_config_json();
   void json_get_map_data(JsonObject root);
 
+  // RUN-04 (09-01): live single-register Global Zone save + ACK-feedback
+  // batch-completion accessors. NVS persistence (save_global_zone_override_)
+  // is wired in 09-03 - this method only performs the live write + ACK
+  // tracking.
+  void save_global_zone_to_sensor(uint8_t sensitivity);
+  // Read by the wait_until: condition lambda and api.respond lambdas in the
+  // fp2_save_global_zone_to_sensor HA action (fp2-sala.yaml/example_config.yaml).
+  bool save_pending() { return !pending_save_attr_ids_.empty(); }
+  bool save_ok() { return !save_failed_; }
+  std::string save_error() { return save_error_; }
+
 protected:
   // Internal logic
   void process_command_queue_();
@@ -632,6 +643,17 @@ protected:
   uint32_t last_command_sent_millis_{0};
   static const uint32_t ACK_TIMEOUT_MS = 500;
   static const uint8_t MAX_RETRIES = 3;
+
+  // RUN-04 (09-01): save-batch completion tracking, fed additively by the
+  // existing ACK-success path (handle_ack_) and retry-exhausted path
+  // (process_command_queue_). Tracks the set of attr writes belonging to the
+  // current "save to sensor" batch that are still awaiting ACK - emptied on
+  // full success, cleared (with save_failed_ set) on the first timeout. Read
+  // via save_pending()/save_ok()/save_error() by the wait_until:+api.respond
+  // composition in the new HA action.
+  std::vector<AttrId> pending_save_attr_ids_;
+  bool save_failed_{false};
+  std::string save_error_;
 
   // Sleep-mode heartbeat keepalive (PROTO-02). Internal-only, no config toggle:
   // gated on sleep_mode_active_, set true by configure_sleep_mode(). Stock firmware
