@@ -4,6 +4,7 @@
 #include "esphome/components/select/select.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/socket/socket.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/component.h"
@@ -16,6 +17,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -435,6 +437,9 @@ public:
   }
   void set_debug_probe_reads(bool enabled) { debug_probe_reads_ = enabled; }
   void set_debug_mode(bool enabled) { debug_mode_ = enabled; }
+  // DIAG-02 (08-04): telnet raw-UART bridge, default disabled (D-05/D-06).
+  void set_telnet_enable(bool enabled) { telnet_enable_ = enabled; }
+  void set_telnet_port(uint16_t port) { telnet_port_ = port; }
 
   void set_fp2_accel(aqara_fp2_accel::AqaraFP2Accel *accel) {
       fp2_accel_ = accel;
@@ -471,6 +476,12 @@ protected:
   void send_next_command_();
   void write_command_frame_(const FP2Command &cmd, bool track_timeout);
   void handle_incoming_byte_(uint8_t byte);
+  // DIAG-02 (08-04): best-effort, non-blocking mirror of raw TX/RX bytes to
+  // the connected telnet client, if any. Pure side effect - never consumes
+  // or delays bytes the frame parser needs. Defined in fp2_component.cpp
+  // once the accept/loop logic (Task 3) exists; declared here so Tasks 2/3
+  // can reference it as the socket scaffolding lands first.
+  void telnet_mirror_(const uint8_t *data, size_t len);
   const char* get_mounting_position_string_();
   void handle_parsed_frame_(uint8_t type, AttrId attr_id,
                             const std::vector<uint8_t> &payload);
@@ -576,6 +587,13 @@ protected:
   binary_sensor::BinarySensor *fall_overtime_sensor_{nullptr};
   bool debug_probe_reads_{false};
   bool debug_mode_{false};
+
+  // DIAG-02 (08-04): optional single-client raw-UART telnet bridge (D-05/
+  // D-06). No socket is created unless telnet_enable_ is true - see setup().
+  bool telnet_enable_{false};
+  uint16_t telnet_port_{23};
+  std::unique_ptr<socket::Socket> telnet_listen_socket_;
+  std::unique_ptr<socket::Socket> telnet_client_;
 
   // Map Configuration (compile-time generated)
   std::string map_config_json_;

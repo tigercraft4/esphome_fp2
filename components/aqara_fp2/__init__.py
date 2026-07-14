@@ -31,7 +31,10 @@ from esphome.util import Registry
 from ..aqara_fp2_accel import AqaraFP2Accel
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["binary_sensor", "text_sensor", "sensor", "select", "switch", "json"]
+# DIAG-02 (08-04): "socket" gives us ESPHome core's non-blocking socket::
+# wrapper (same one api_server.cpp uses) for the optional telnet raw-UART
+# bridge - no separate pip install, no FreeRTOS task.
+AUTO_LOAD = ["binary_sensor", "text_sensor", "sensor", "select", "switch", "json", "socket"]
 
 aqara_fp2_ns = cg.esphome_ns.namespace("aqara_fp2")
 FP2Component = aqara_fp2_ns.class_("FP2Component", cg.Component, uart.UARTDevice)
@@ -102,6 +105,12 @@ CONF_RADAR_SOFTWARE_VERSION = "radar_software_version"
 CONF_RADAR_DEBUG = "radar_debug"
 CONF_DEBUG_PROBE_READS = "debug_probe_reads"
 CONF_DEBUG_MODE = "debug_mode"
+# DIAG-02 (08-04): optional single-client raw-UART telnet bridge. Default
+# DISABLED (D-05) - no port opened unless telnet_enable is explicitly set.
+# No authentication (D-06) - LAN-only/trusted-network use, documented loudly
+# in example_config.yaml and via a config-time ESP_LOGW.
+CONF_TELNET_ENABLE = "telnet_enable"
+CONF_TELNET_PORT = "telnet_port"
 
 MOUNTING_POSITIONS = {
     "wall": 0x01,
@@ -282,6 +291,8 @@ CONFIG_SCHEMA = (
             ),
             cv.Optional(CONF_DEBUG_PROBE_READS, default=False): cv.boolean,
             cv.Optional(CONF_DEBUG_MODE, default=False): cv.boolean,
+            cv.Optional(CONF_TELNET_ENABLE, default=False): cv.boolean,
+            cv.Optional(CONF_TELNET_PORT, default=23): cv.port,
             cv.Optional(CONF_RADAR_TEMPERATURE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_CELSIUS,
                 icon=ICON_THERMOMETER,
@@ -434,6 +445,8 @@ async def to_code(config):
     cg.add(var.set_left_right_reverse(config[CONF_LEFT_RIGHT_REVERSE]))
     cg.add(var.set_debug_probe_reads(config[CONF_DEBUG_PROBE_READS]))
     cg.add(var.set_debug_mode(config[CONF_DEBUG_MODE]))
+    cg.add(var.set_telnet_enable(config[CONF_TELNET_ENABLE]))
+    cg.add(var.set_telnet_port(config[CONF_TELNET_PORT]))
     cg.add(var.set_people_counting_report_enable(config[CONF_PEOPLE_COUNTING_REPORT_ENABLE]))
     cg.add(var.set_people_number_enable(config[CONF_PEOPLE_NUMBER_ENABLE]))
     cg.add(var.set_target_type_enable(config[CONF_TARGET_TYPE_ENABLE]))

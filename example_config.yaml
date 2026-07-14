@@ -198,6 +198,13 @@ aqara_fp2:
   # protocol reverse-engineering, beyond the existing radar_debug diagnostics.
   # Default false = current radar_debug-only behavior, byte-for-byte unchanged.
   # debug_mode: true
+
+  # Optional raw-UART telnet bridge for live protocol sniffing. DEFAULT DISABLED.
+  # WARNING: NO AUTHENTICATION. LAN-only / trusted-network use ONLY - never expose
+  # this port to the internet (matches this project's no-MQTT / minimal-attack-surface
+  # posture). Single client only; a new connection replaces the previous one.
+  # telnet_enable: true
+  # telnet_port: 23
   # Optional feature streams. Enable only when you want to experiment with them.
   # sleep_report_enable: true
   # posture_report_enable: true
