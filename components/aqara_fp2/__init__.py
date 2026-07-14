@@ -3,7 +3,7 @@ import json
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
-from esphome.components import binary_sensor, sensor, switch, uart
+from esphome.components import binary_sensor, select, sensor, switch, uart
 from esphome.components import text_sensor as text_sensor_
 from esphome.const import (
     CONF_DEVICE_CLASS,
@@ -31,12 +31,18 @@ from esphome.util import Registry
 from ..aqara_fp2_accel import AqaraFP2Accel
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["binary_sensor", "text_sensor", "sensor", "switch", "json"]
+AUTO_LOAD = ["binary_sensor", "text_sensor", "sensor", "select", "switch", "json"]
 
 aqara_fp2_ns = cg.esphome_ns.namespace("aqara_fp2")
 FP2Component = aqara_fp2_ns.class_("FP2Component", cg.Component, uart.UARTDevice)
 FP2LocationSwitch = aqara_fp2_ns.class_("FP2LocationSwitch", switch.Switch)
+FP2OperatingModeSelect = aqara_fp2_ns.class_("FP2OperatingModeSelect", select.Select)
 FP2Zone = aqara_fp2_ns.class_("FP2Zone", cg.Component)
+
+# PROTO-04 (D-04): must match fp2_component.h's OPERATING_MODE_* constants
+# exactly (Zone/Fall/Sleep, in this order) so the select's options list and
+# the C++ control() mapping stay in sync.
+OPERATING_MODE_OPTIONS = ["Zone Detection", "Fall Detection", "Sleep Monitoring"]
 
 CONF_FP2_ID = "fp2_id"
 
@@ -68,6 +74,7 @@ CONF_WALKING_DISTANCE_ENABLE = "walking_distance_enable"
 CONF_THERMODYNAMIC_CHART_ENABLE = "thermodynamic_chart_enable"
 CONF_TARGET_TRACKING = "target_tracking"
 CONF_LOCATION_REPORT_SWITCH = "location_report_switch"
+CONF_OPERATING_MODE = "operating_mode"
 CONF_RADAR_TEMPERATURE = "radar_temperature"
 CONF_REALTIME_PEOPLE_NUMBER = "realtime_people_number"
 CONF_ONTIME_PEOPLE_NUMBER = "ontime_people_number"
@@ -236,6 +243,9 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_TARGET_TRACKING): text_sensor_.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
             cv.Optional(CONF_LOCATION_REPORT_SWITCH): switch.switch_schema(
                 FP2LocationSwitch
+            ),
+            cv.Optional(CONF_OPERATING_MODE): select.select_schema(
+                FP2OperatingModeSelect
             ),
 
             cv.Optional("edge_label_grid_sensor"): text_sensor_.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
@@ -447,6 +457,15 @@ async def to_code(config):
         if key in config:
             sens = await new(config[key])
             cg.add(getattr(var, funcName)(sens))
+
+    # PROTO-04 (D-04): registered inline (not via SENSOR_MAP) because
+    # select.new_select() requires the extra `options` kwarg the generic
+    # SENSOR_MAP loop above doesn't pass through.
+    if CONF_OPERATING_MODE in config:
+        sel = await select.new_select(
+            config[CONF_OPERATING_MODE], options=OPERATING_MODE_OPTIONS
+        )
+        cg.add(var.set_operating_mode_select(sel))
 
     # Generate map config JSON data at compile time
     map_config_data = {
