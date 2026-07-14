@@ -59,6 +59,24 @@ api:
       then:
         - lambda: |-
             id(fp2).write_attr_uint8((uint16_t) attr, (uint8_t) value);
+    # RUN-04 (09-01): live Global Zone presence_sensitivity save with a real
+    # ACK-feedback response - wait_until: suspends until save_pending()
+    # empties (ACK) or save_failed_ is set (retry-exhaust/invalid input),
+    # then api.respond reports the true outcome (RESEARCH Pattern 3).
+    - action: fp2_save_global_zone_to_sensor
+      variables:
+        sensitivity: int
+      supports_response: status
+      then:
+        - lambda: |-
+            id(fp2).save_global_zone_to_sensor((uint8_t) sensitivity);
+        - wait_until:
+            timeout: 3s
+            condition:
+              lambda: 'return !id(fp2).save_pending();'
+        - api.respond:
+            success: !lambda 'return id(fp2).save_ok();'
+            error_message: !lambda 'return id(fp2).save_error();'
     - action: fp2_write_attr_uint16
       variables:
         attr: int
