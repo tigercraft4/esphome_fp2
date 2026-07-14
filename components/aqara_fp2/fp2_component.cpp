@@ -3,6 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -445,10 +446,40 @@ void FP2OperatingModeSelect::control(const std::string &value) {
 }
 
 void FP2Component::loop() {
+  // DIAG-02 (08-04): accept a new telnet client. Single client only (D-05) -
+  // a new connection replaces the existing one rather than being rejected.
+  if (telnet_listen_socket_ && telnet_listen_socket_->ready()) {
+    struct sockaddr_storage addr;
+    socklen_t addr_len = sizeof(addr);
+    auto sock = telnet_listen_socket_->accept_loop_monitored((struct sockaddr *) &addr, &addr_len);
+    if (sock) {
+      if (telnet_client_) {
+        ESP_LOGI(TAG, "telnet: replacing existing client");
+      }
+      telnet_client_ = std::move(sock);
+      telnet_client_->setblocking(false);
+    }
+  }
+
   while (available()) {
     uint8_t byte;
     read_byte(&byte);
+    telnet_mirror_(&byte, 1);  // DIAG-02 (08-04): RX mirror, pure side effect
     handle_incoming_byte_(byte);
+  }
+
+  // DIAG-02 (08-04): periodic non-blocking drain of any bytes the telnet
+  // client sends us. We never act on them (read-only mirror, not a command
+  // channel) - this exists solely to detect disconnects (read()==0) and
+  // avoid unbounded kernel send-buffer growth on a never-draining client
+  // (RESEARCH Open Question 2 / T-08-09).
+  if (telnet_client_) {
+    uint8_t drain_buf[32];
+    ssize_t n = telnet_client_->read(drain_buf, sizeof(drain_buf));
+    if (n == 0) {
+      ESP_LOGI(TAG, "telnet: client disconnected");
+      telnet_client_.reset();
+    }
   }
 
   check_initialization_();
@@ -697,6 +728,7 @@ void FP2Component::write_command_frame_(const FP2Command &cmd, bool track_timeou
   frame.push_back((crc >> 8) & 0xFF);
 
   write_array(frame);
+  telnet_mirror_(frame.data(), frame.size());  // DIAG-02 (08-04): TX mirror, full encoded frame
   if (debug_mode_) {
     ESP_LOGD(TAG, "[debug_mode] TX frame: %s", format_payload_hex_(frame, frame.size()).c_str());
   }
@@ -709,6 +741,20 @@ void FP2Component::write_command_frame_(const FP2Command &cmd, bool track_timeou
            op_code_to_string_((uint8_t) cmd.type), attr_id_to_string_(cmd.attr_id),
            (uint16_t) cmd.attr_id, static_cast<unsigned>(cmd.data.size()),
            format_payload_hex_(cmd.data, 64).c_str());
+}
+
+// DIAG-02 (08-04): best-effort, non-blocking mirror of raw TX/RX bytes to the
+// connected telnet client. Drop-on-backpressure - never block loop() on a
+// telnet write (T-08-08). A hard write error resets the client so the next
+// accept() cycle can pick up a new connection.
+void FP2Component::telnet_mirror_(const uint8_t *data, size_t len) {
+  if (!telnet_client_)
+    return;
+  ssize_t n = telnet_client_->write(data, len);
+  if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+    ESP_LOGI(TAG, "telnet: client disconnected");
+    telnet_client_.reset();
+  }
 }
 
 void FP2Component::send_next_command_() {
