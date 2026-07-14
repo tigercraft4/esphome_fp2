@@ -54,6 +54,7 @@ const char* FP2Component::attr_id_to_string_(AttrId attr_id) {
     case AttrId::TEMPERATURE: return "temperature";
     case AttrId::FALL_OVERTIME_REPORT_PERIOD: return "fall_overtime_report_period";
     case AttrId::FALL_OVERTIME_DETECTION: return "fall_overtime_detection";
+    case AttrId::FALL_OVERTIME_REPORT: return "fall_overtime_report";
     case AttrId::THERMO_EN: return "thermodynamic_chart_enable";
     case AttrId::INTERFERENCE_AUTO_ENABLE: return "interference_auto_enable";
     case AttrId::THERMO_DATA: return "thermodynamic_chart_data";
@@ -1072,6 +1073,17 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
       // inside handle_simple_uint8_binary_report_(), so no information is
       // silently dropped.
       handle_simple_uint8_binary_report_(payload, fall_detected_sensor_, "fall_detection_result");
+      break;
+
+    case AttrId::FALL_OVERTIME_REPORT:
+      // SENSE-02 (08-02): distinct async report SubID, not the 0x0134/0x0135
+      // config attributes. KNOWN RISK: an independent fork's reverse
+      // engineering characterizes this SubID's stock-firmware handler as a
+      // 3-byte no-data stub (likely inert). The reused helper below already
+      // bounds-checks (payload.size() != 4) and routes a malformed/short
+      // payload to publish_radar_debug_ safely, without crashing, which is
+      // the correct behavior whether or not this SubID ever carries real data.
+      handle_simple_uint8_binary_report_(payload, fall_overtime_sensor_, "fall_overtime_report");
       break;
 
     case AttrId::SLEEP_EVENT:

@@ -175,6 +175,15 @@ enum class AttrId : uint16_t {
     OTA_SET_FLAG                    = 0x0127,
     FALL_OVERTIME_REPORT_PERIOD     = 0x0134,
     FALL_OVERTIME_DETECTION         = 0x0135,
+    // SENSE-02 (08-02): fall-overtime EVENT report, distinct from 0x0134
+    // (REPORT_PERIOD, config) and 0x0135 (DETECTION, config enable) above.
+    // KNOWN RISK: an independent fork's reverse-engineering characterizes
+    // this SubID's stock-firmware handler as a 3-byte no-data stub and
+    // treats it as likely inert. Implemented structurally regardless
+    // (08-RESEARCH.md Pitfall 1 / Assumption A1) via the existing
+    // bounds-checked handle_simple_uint8_binary_report_ helper, which
+    // safely rejects a short/malformed payload without crashing.
+    FALL_OVERTIME_REPORT            = 0x0136,
     INTERFERENCE_AUTO_ENABLE        = 0x0139,
     EDGE_AUTO_SETTING               = 0x0149,
     EDGE_AUTO_ENABLE                = 0x0150,
@@ -421,6 +430,9 @@ public:
   void set_fall_detected_sensor(binary_sensor::BinarySensor *sensor) {
       fall_detected_sensor_ = sensor;
   }
+  void set_fall_overtime_sensor(binary_sensor::BinarySensor *sensor) {
+      fall_overtime_sensor_ = sensor;
+  }
   void set_debug_probe_reads(bool enabled) { debug_probe_reads_ = enabled; }
 
   void set_fp2_accel(aqara_fp2_accel::AqaraFP2Accel *accel) {
@@ -560,6 +572,7 @@ protected:
   binary_sensor::BinarySensor *sleep_presence_sensor_{nullptr};
   binary_sensor::BinarySensor *sleep_inout_sensor_{nullptr};
   binary_sensor::BinarySensor *fall_detected_sensor_{nullptr};
+  binary_sensor::BinarySensor *fall_overtime_sensor_{nullptr};
   bool debug_probe_reads_{false};
 
   // Map Configuration (compile-time generated)
