@@ -97,6 +97,29 @@ api:
         - api.respond:
             success: !lambda 'return id(fp2).save_ok();'
             error_message: !lambda 'return id(fp2).save_error();'
+    # RUN-01 (09-02): live single-zone save (grid + sensitivity + zone_type)
+    # bundled into one write the radar ACKs (D-02), using the same
+    # wait_until:+api.respond ACK-feedback mechanism as
+    # fp2_save_global_zone_to_sensor above. zone_type: -1 means "not set".
+    # 8s timeout covers worst-case FIFO retry-exhaustion across up to 4
+    # sequential registers (RESEARCH Pitfall 5), not just one.
+    - action: fp2_save_zone_to_sensor
+      variables:
+        zone_id: int
+        grid_hex: string
+        sensitivity: int
+        zone_type: int
+      supports_response: status
+      then:
+        - lambda: |-
+            id(fp2).save_zone_to_sensor((uint8_t) zone_id, grid_hex, (uint8_t) sensitivity, zone_type);
+        - wait_until:
+            timeout: 8s
+            condition:
+              lambda: 'return !id(fp2).save_pending();'
+        - api.respond:
+            success: !lambda 'return id(fp2).save_ok();'
+            error_message: !lambda 'return id(fp2).save_error();'
 
 ota:
   - platform: esphome
