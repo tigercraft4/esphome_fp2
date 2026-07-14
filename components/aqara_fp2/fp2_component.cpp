@@ -174,6 +174,26 @@ void FP2Component::setup() {
 
   // GPIO Reset
   perform_reset_();
+
+  // DIAG-02 (08-04): optional single-client raw-UART telnet bridge (D-05).
+  // No socket is created at all unless telnet_enable_ was explicitly set -
+  // default-disabled means no port opened (D-05/D-06).
+  if (telnet_enable_) {
+    telnet_listen_socket_ = socket::socket_ip_loop_monitored(SOCK_STREAM, 0);
+    if (telnet_listen_socket_ == nullptr) {
+      ESP_LOGW(TAG, "telnet: could not create listen socket");
+    } else {
+      int enable = 1;
+      telnet_listen_socket_->setsockopt(SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
+      telnet_listen_socket_->setblocking(false);
+      struct sockaddr_storage server;
+      socklen_t sl = socket::set_sockaddr_any((struct sockaddr *) &server, sizeof(server), telnet_port_);
+      telnet_listen_socket_->bind((struct sockaddr *) &server, sl);
+      telnet_listen_socket_->listen(1);  // backlog=1: single client only (D-05)
+      ESP_LOGW(TAG, "telnet raw UART bridge listening on port %u - LAN-ONLY, NO AUTHENTICATION. "
+                    "Never expose this port to the internet.", telnet_port_);
+    }
+  }
 }
 
 void FP2Component::perform_reset_() {
