@@ -199,6 +199,12 @@ aqara_fp2:
   # posture_report_enable: true
   # fall_detection: false
   # fall_detection_sensitivity: medium
+  # Surfaces the corrected 0x0121 fall-event report (0=clear/1=type A/2=type B)
+  # as a binary_sensor. Requires WORK_MODE=8 (Fall Detection) to fire — see
+  # the fp2_set_work_mode diagnostic action. Optional; not tied to the
+  # fall_detection flag above.
+  # fall_detected:
+  #   name: "Fall Detected"
 
   target_tracking:
     name: "Targets"
