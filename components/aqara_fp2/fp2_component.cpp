@@ -431,6 +431,120 @@ void FP2Component::save_global_zone_to_sensor(uint8_t sensitivity) {
   pending_save_attr_ids_.push_back(AttrId::PRESENCE_DETECT_SENSITIVITY);
 }
 
+// Returns 0-15 for a valid hex digit, -1 otherwise. Avoids pulling in
+// <cctype>/locale-dependent isxdigit() for a fixed ASCII hex alphabet.
+static int fp2_hex_nibble_(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+// RUN-01 (09-02): live scoped-to-one-zone save (grid + sensitivity +
+// zone_type) for an already-compiled zone. All validation (V5) happens here,
+// before any enqueue_command_ call - this is the first full-payload
+// runtime-writable input reaching a live UART write in this codebase.
+// Replicates check_initialization_()'s per-zone register sequence
+// (fp2_component.cpp ~594-611) scoped to ONE zone; does NOT resend
+// ZONE_ACTIVATION_LIST (D-04) and does NOT attempt a read-back (D-03).
+void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_hex,
+                                        uint8_t sensitivity, int zone_type) {
+  // (a) zone_id must match an actually-compiled zone (Pitfall 2) - a linear
+  // search of zones_, NOT a bare 0-31 protocol-range check. zones_ is tiny
+  // (0-2 entries in practice), so this is cheap.
+  bool zone_found = false;
+  for (const auto &zone : zones_) {
+    if (zone->id == zone_id) {
+      zone_found = true;
+      break;
+    }
+  }
+  if (!zone_found) {
+    ESP_LOGW(TAG, "save_zone_to_sensor: zone_id %u is not a compiled zone", zone_id);
+    save_failed_ = true;
+    save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " is not a compiled zone";
+    return;
+  }
+
+  // (b) sensitivity must be in {1,2,3}.
+  if (sensitivity < 1 || sensitivity > 3) {
+    ESP_LOGW(TAG, "save_zone_to_sensor: invalid sensitivity %u (must be 1-3)", sensitivity);
+    save_failed_ = true;
+    save_error_ = std::string("invalid sensitivity ") + std::to_string(sensitivity) +
+                  " (must be 1-3)";
+    return;
+  }
+
+  // (c) zone_type must be -1 (sentinel = not set) or a ZONE_TYPES value.
+  if (zone_type != -1 && zone_type != 0 && zone_type != 2 && zone_type != 10 &&
+      zone_type != 11 && zone_type != 13 && zone_type != 14 && zone_type != 15 &&
+      zone_type != 23 && zone_type != 36) {
+    ESP_LOGW(TAG, "save_zone_to_sensor: invalid zone_type %d", zone_type);
+    save_failed_ = true;
+    save_error_ = std::string("invalid zone_type ") + std::to_string(zone_type);
+    return;
+  }
+
+  // (d) grid_hex must be exactly 80 hex characters (40 bytes).
+  if (grid_hex.size() != 80) {
+    ESP_LOGW(TAG, "save_zone_to_sensor: grid_hex length %u (must be 80)",
+             (unsigned) grid_hex.size());
+    save_failed_ = true;
+    save_error_ = std::string("grid_hex must be exactly 80 hex characters, got ") +
+                  std::to_string(grid_hex.size());
+    return;
+  }
+  GridMap grid{};
+  for (size_t i = 0; i < 40; i++) {
+    int hi = fp2_hex_nibble_(grid_hex[i * 2]);
+    int lo = fp2_hex_nibble_(grid_hex[i * 2 + 1]);
+    if (hi < 0 || lo < 0) {
+      ESP_LOGW(TAG, "save_zone_to_sensor: grid_hex contains a non-hex character");
+      save_failed_ = true;
+      save_error_ = "grid_hex contains a non-hex character";
+      return;
+    }
+    grid[i] = (uint8_t)((hi << 4) | lo);
+  }
+
+  // All valid - clear any prior failure state and start a fresh save batch.
+  ESP_LOGI(TAG, "Queueing zone %u save (sensitivity=%u, zone_type=%d)", zone_id, sensitivity,
+           zone_type);
+  save_failed_ = false;
+  save_error_.clear();
+  pending_save_attr_ids_.clear();
+
+  // 1. ZONE_MAP (0x0114): [ZoneID] [40-byte grid], BLOB2.
+  std::vector<uint8_t> payload;
+  payload.push_back(zone_id);
+  payload.insert(payload.end(), grid.begin(), grid.end());
+  enqueue_command_blob2_(AttrId::ZONE_MAP, payload);
+  pending_save_attr_ids_.push_back(AttrId::ZONE_MAP);
+
+  // 2. ZONE_SENSITIVITY (0x0151): UINT16 (High=ID, Low=Sensitivity).
+  enqueue_command_(OpCode::WRITE, AttrId::ZONE_SENSITIVITY,
+                    (uint16_t)((zone_id << 8) | (sensitivity & 0xFF)));
+  pending_save_attr_ids_.push_back(AttrId::ZONE_SENSITIVITY);
+
+  // 3. DETECT_ZONE_TYPE (0x0152), only if the caller set one.
+  if (zone_type >= 0) {
+    enqueue_command_(OpCode::WRITE, AttrId::DETECT_ZONE_TYPE,
+                      (uint16_t)((zone_id << 8) | ((uint8_t) zone_type & 0xFF)));
+    pending_save_attr_ids_.push_back(AttrId::DETECT_ZONE_TYPE);
+  }
+
+  // 4. ZONE_CLOSE_AWAY_ENABLE (0x0153): UINT16 (High=ID, Low=1/enabled).
+  // NOTE (D-04): the 32-byte auxiliary activation-list register is
+  // intentionally NOT resent here - it's only relevant when adding/removing
+  // zones, out of scope for editing an already-compiled zone.
+  enqueue_command_(OpCode::WRITE, AttrId::ZONE_CLOSE_AWAY_ENABLE,
+                    (uint16_t)((zone_id << 8) | 1));
+  pending_save_attr_ids_.push_back(AttrId::ZONE_CLOSE_AWAY_ENABLE);
+
+  // TODO(09-03): persist this override via save_zone_override_() (NVS) so it
+  // survives a host reboot without a reflash - not wired yet in this plan.
+}
+
 void FP2LocationSwitch::write_state(bool state) {
   if (this->parent_ != nullptr) {
     this->parent_->set_location_reporting_enabled(state);

@@ -475,6 +475,20 @@ public:
   // is wired in 09-03 - this method only performs the live write + ACK
   // tracking.
   void save_global_zone_to_sensor(uint8_t sensitivity);
+  // RUN-01 (09-02): live scoped-to-one-zone write (grid + sensitivity +
+  // zone_type) for an already-compiled zone, bundled as one write the radar
+  // ACKs (D-02). All parameters are validated server-side (V5) before any
+  // enqueue: zone_id must match an actual compiled entry in zones_ (not a
+  // bare 0-31 range check), sensitivity must be in {1,2,3}, zone_type must
+  // be -1 (unset) or a ZONE_TYPES value, and grid_hex must be exactly 80 hex
+  // characters. Reuses the same pending_save_attr_ids_ batch 09-01
+  // established - up to 4 registers this time (ZONE_MAP, ZONE_SENSITIVITY,
+  // DETECT_ZONE_TYPE if set, ZONE_CLOSE_AWAY_ENABLE). Does NOT resend
+  // ZONE_ACTIVATION_LIST (D-04). NVS persistence (save_zone_override_) is
+  // wired in 09-03 - this method only performs the live write + ACK
+  // tracking.
+  void save_zone_to_sensor(uint8_t zone_id, const std::string &grid_hex, uint8_t sensitivity,
+                            int zone_type);
   // Read by the wait_until: condition lambda and api.respond lambdas in the
   // fp2_save_global_zone_to_sensor HA action (fp2-sala.yaml/example_config.yaml).
   bool save_pending() { return !pending_save_attr_ids_.empty(); }
