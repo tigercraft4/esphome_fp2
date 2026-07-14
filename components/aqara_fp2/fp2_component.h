@@ -146,7 +146,18 @@ enum class AttrId : uint16_t {
     PRESENCE_DETECT_SENSITIVITY     = 0x0111, // Sensitivity (1-3)
     CLOSING_SETTING                 = 0x0106, // Proximity (0=far, 1=med, 2=close)
     ZONE_CLOSE_AWAY_ENABLE          = 0x0153, // Zone N close/away enable
-    FALL_DETECTION                  = 0x0121, // Fall detection enable
+    // PROTO-03 (2026-07-14): 0x0121 is NOT a boolean "fall detection enable"
+    // register — it is the fall EVENT report: 0=clear, 1=type A, 2=type B.
+    // Ghidra-verified per JameZUK/esphome_fp2_ng; it only fires while the
+    // radar is in WORK_MODE=8 (Fall Detection scene). There is no separate
+    // enable register anywhere in the protocol — do not reintroduce a
+    // boolean write here. NOTE: this disagrees with the independent
+    // hansihe/AqaraPresenceSensorFP2ReverseEngineering PROTOCOL.md reference,
+    // which still lists 0x0121 as "fall_det, RW, Fall Detection Enable" —
+    // that reference predates the Ghidra-verified fork comparison and is
+    // wrong for this specific SubID (07-RESEARCH.md Pitfall 3). Do not
+    // "correct" this back using that reference.
+    FALL_DETECTION_RESULT           = 0x0121, // Fall event report: 0=clear/1=type A/2=type B
     FALL_SENSITIVITY                = 0x0123, // Fall sensitivity
     RADAR_INTERFERENCE_AUTO_SETTING = 0x0125,
     OTA_SET_FLAG                    = 0x0127,
@@ -178,8 +189,13 @@ enum class AttrId : uint16_t {
     SLEEP_EVENT                     = 0x0176,
     SLEEP_EVENT_DESCRIPTOR          = 0x0177,
     SLEEP_BED_HEIGHT                = 0x0178,
-    OVERHEAD_HEIGHT                 = 0x0179,
-    FALL_DELAY_TIME                 = 0x0180,
+    // PROTO-03 (2026-07-14): the two entries below were mismapped — 0x0179
+    // was labeled OVERHEAD_HEIGHT (wrong) and 0x0180 was labeled
+    // FALL_DELAY_TIME (wrong value). Ghidra-verified per
+    // JameZUK/esphome_fp2_ng: 0x0179 is FALL_DELAY_TIME, 0x0180 is
+    // FALLDOWN_BLIND_ZONE (a 40-byte exclusion-zone grid, BLOB2).
+    FALL_DELAY_TIME                 = 0x0179, // Delay before confirming a fall (uint16)
+    FALLDOWN_BLIND_ZONE             = 0x0180, // Fall-detection exclusion zones (40B grid, BLOB2)
     INTERFERENCE_MAP                = 0x0110, // Interference map (40B)
     ENTRY_EXIT_MAP                  = 0x0109, // Enter/exit zones (40B)
     EDGE_MAP                        = 0x0107, // Detection boundary (40B)
@@ -366,6 +382,9 @@ public:
   void set_sleep_inout_sensor(binary_sensor::BinarySensor *sensor) {
       sleep_inout_sensor_ = sensor;
   }
+  void set_fall_detected_sensor(binary_sensor::BinarySensor *sensor) {
+      fall_detected_sensor_ = sensor;
+  }
   void set_debug_probe_reads(bool enabled) { debug_probe_reads_ = enabled; }
 
   void set_fp2_accel(aqara_fp2_accel::AqaraFP2Accel *accel) {
@@ -503,6 +522,7 @@ protected:
   text_sensor::TextSensor *people_counting_sensor_{nullptr};
   binary_sensor::BinarySensor *sleep_presence_sensor_{nullptr};
   binary_sensor::BinarySensor *sleep_inout_sensor_{nullptr};
+  binary_sensor::BinarySensor *fall_detected_sensor_{nullptr};
   bool debug_probe_reads_{false};
 
   // Map Configuration (compile-time generated)

@@ -46,7 +46,7 @@ const char* FP2Component::attr_id_to_string_(AttrId attr_id) {
     case AttrId::WORK_MODE: return "work_mode";
     case AttrId::LOCATION_TRACKING_DATA: return "location_track_data";
     case AttrId::ANGLE_SENSOR_DATA: return "angle_sensor_data";
-    case AttrId::FALL_DETECTION: return "fall_detection";
+    case AttrId::FALL_DETECTION_RESULT: return "fall_detection_result";
     case AttrId::LEFT_RIGHT_REVERSE: return "left_right_reverse";
     case AttrId::FALL_SENSITIVITY: return "fall_detection_sensitivity";
     case AttrId::RADAR_INTERFERENCE_AUTO_SETTING: return "radar_interference_auto_setting";
@@ -88,8 +88,8 @@ const char* FP2Component::attr_id_to_string_(AttrId attr_id) {
     case AttrId::SLEEP_EVENT: return "sleep_event";
     case AttrId::SLEEP_EVENT_DESCRIPTOR: return "sleep_event_descriptor";
     case AttrId::SLEEP_BED_HEIGHT: return "sleep_bed_height";
-    case AttrId::OVERHEAD_HEIGHT: return "overhead_height";
     case AttrId::FALL_DELAY_TIME: return "fall_delay_time";
+    case AttrId::FALLDOWN_BLIND_ZONE: return "falldown_blind_zone";
     case AttrId::DEBUG_LOG: return "debug_log";
     case AttrId::ZONE_ACTIVATION_LIST: return "aux_data";
     case AttrId::SLEEP_HEARTBEAT_SYNC: return "sleep_heartbeat_sync";
@@ -249,7 +249,7 @@ void FP2Component::read_mode_calibration_config() {
   enqueue_read_(AttrId::PRESENCE_DETECT);
   enqueue_read_(AttrId::PRESENCE_DETECT_SENSITIVITY);
   enqueue_read_(AttrId::LOCATION_REPORT_ENABLE);
-  enqueue_read_(AttrId::FALL_DETECTION);
+  enqueue_read_(AttrId::FALL_DETECTION_RESULT);
   enqueue_read_(AttrId::FALL_SENSITIVITY);
   enqueue_read_(AttrId::FALL_OVERTIME_REPORT_PERIOD);
   enqueue_read_(AttrId::FALL_OVERTIME_DETECTION);
@@ -259,7 +259,7 @@ void FP2Component::read_mode_calibration_config() {
   enqueue_read_(AttrId::SLEEP_MOUNT_POSITION);
   enqueue_read_(AttrId::SLEEP_ZONE_SIZE);
   enqueue_read_(AttrId::SLEEP_BED_HEIGHT);
-  enqueue_read_(AttrId::OVERHEAD_HEIGHT);
+  enqueue_read_(AttrId::FALLDOWN_BLIND_ZONE);
   enqueue_read_(AttrId::WALL_CORNER_POS);
   enqueue_read_(AttrId::SLEEP_STATE);
   enqueue_read_(AttrId::SLEEP_PRESENCE);
@@ -426,8 +426,16 @@ void FP2Component::check_initialization_() {
     enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, global_presence_sensitivity_);
     enqueue_command_(OpCode::WRITE, AttrId::CLOSING_SETTING, (uint8_t) 1);
     enqueue_command_(OpCode::WRITE, AttrId::ZONE_CLOSE_AWAY_ENABLE, (uint16_t) 0x0001);
-    if (has_fall_detection_enabled_) {
-      enqueue_command_(OpCode::WRITE, AttrId::FALL_DETECTION, (uint8_t)(fall_detection_enabled_ ? 1 : 0));
+    // PROTO-03 (2026-07-14): 0x0121 is report-only (fall event, not a
+    // boolean enable) as of this fix — there is no separate fall-detection
+    // enable register anywhere in the protocol. The old boot-time boolean
+    // WRITE of AttrId::FALL_DETECTION has been removed. Fall events only
+    // fire while the radar is in WORK_MODE=8; switch into it via the
+    // already-shipped fp2_set_work_mode(8) diagnostic action.
+    if (has_fall_detection_enabled_ && fall_detection_enabled_) {
+      ESP_LOGW(TAG, "fall_detection: true has no boot-time write effect as of this fix — "
+                    "0x0121 is fall-event-report-only. Fall events require WORK_MODE=8; "
+                    "switch via the fp2_set_work_mode(8) diagnostic action.");
     }
     if (has_fall_detection_sensitivity_) {
       enqueue_command_(OpCode::WRITE, AttrId::FALL_SENSITIVITY, fall_detection_sensitivity_);
@@ -997,6 +1005,16 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
 
     case AttrId::SLEEP_INOUT_STATE:
       handle_simple_uint8_binary_report_(payload, sleep_inout_sensor_, "sleep_inout_state");
+      break;
+
+    case AttrId::FALL_DETECTION_RESULT:
+      // Treats the 3-state event (0=clear/1=type A/2=type B) as boolean
+      // (!=0) for the HA entity, matching the reference fork's own choice.
+      // The raw payload is still visible via the ESP_LOGV frame-receipt log
+      // in handle_parsed_frame_() and the malformed-report radar_debug path
+      // inside handle_simple_uint8_binary_report_(), so no information is
+      // silently dropped.
+      handle_simple_uint8_binary_report_(payload, fall_detected_sensor_, "fall_detection_result");
       break;
 
     case AttrId::SLEEP_EVENT:
