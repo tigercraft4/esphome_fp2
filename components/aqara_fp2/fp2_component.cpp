@@ -3,6 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include "esphome/core/preferences.h"
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -408,12 +409,52 @@ void FP2Component::set_interference_auto_enabled(bool enabled) {
   enqueue_command_(OpCode::WRITE, AttrId::INTERFERENCE_AUTO_ENABLE, enabled);
 }
 
-// RUN-04 (09-01): live single-register Global Zone presence_sensitivity save.
-// Write-and-forget (D-03) - ACK-of-write is the only success signal, no
-// read-back attempted. NVS persistence (save_global_zone_override_) is
-// wired in 09-03; this method's job here is the live write + registering
-// the write in the pending-save batch so the new HA action's wait_until:
-// condition (save_pending()) can observe real completion.
+// RUN-02/RUN-04 (09-03): NVS override load/save helpers using ESPHome's
+// standard global_preferences->make_preference<T>(fnv1_hash(...)) mechanism
+// (09-RESEARCH.md Pattern 4, Don't Hand-Roll) - not raw NVS/SPIFFS, not a
+// hand-rolled hash. The per-zone key derives from the zone's numeric id; the
+// Global Zone key is a distinct string literal so it can never collide with
+// a per-zone entry (D-05).
+//
+// Known limitation (09-RESEARCH.md Open Question 2, out of scope for
+// RUN-02): an override is keyed by numeric zone_id only - if the zones:
+// YAML list is reordered across a reflash, a saved override could be
+// re-applied to a different physical zone than the one it was saved for.
+// Not handled this phase (T-09-10, accepted).
+bool FP2Component::load_zone_override_(uint8_t zone_id, FP2ZoneOverride *out) {
+  auto pref = global_preferences->make_preference<FP2ZoneOverride>(
+      fnv1_hash("fp2_zone_override_" + std::to_string(zone_id)));
+  return pref.load(out) && out->version == FP2_OVERRIDE_VERSION;
+}
+
+void FP2Component::save_zone_override_(uint8_t zone_id, const GridMap &grid, uint8_t sensitivity,
+                                        int zone_type) {
+  FP2ZoneOverride ov{FP2_OVERRIDE_VERSION, grid, sensitivity, (int16_t) zone_type};
+  auto pref = global_preferences->make_preference<FP2ZoneOverride>(
+      fnv1_hash("fp2_zone_override_" + std::to_string(zone_id)));
+  pref.save(&ov);
+}
+
+bool FP2Component::load_global_zone_override_(FP2GlobalZoneOverride *out) {
+  auto pref = global_preferences->make_preference<FP2GlobalZoneOverride>(
+      fnv1_hash("fp2_global_zone_override"));
+  return pref.load(out) && out->version == FP2_OVERRIDE_VERSION;
+}
+
+void FP2Component::save_global_zone_override_(uint8_t presence_sensitivity) {
+  FP2GlobalZoneOverride ov{FP2_OVERRIDE_VERSION, presence_sensitivity};
+  auto pref = global_preferences->make_preference<FP2GlobalZoneOverride>(
+      fnv1_hash("fp2_global_zone_override"));
+  pref.save(&ov);
+}
+
+// RUN-04 (09-01/09-03): live single-register Global Zone presence_sensitivity
+// save. Write-and-forget (D-03) - ACK-of-write is the only success signal,
+// no read-back attempted. On the valid path this also persists the value to
+// NVS (save_global_zone_override_(), 09-03) so it survives a host reboot
+// without a reflash, and registers the write in the pending-save batch so
+// the HA action's wait_until: condition (save_pending()) can observe real
+// completion.
 void FP2Component::save_global_zone_to_sensor(uint8_t sensitivity) {
   // V5: validate before any enqueue - out-of-range input never reaches the UART.
   if (sensitivity < 1 || sensitivity > 3) {
@@ -429,6 +470,11 @@ void FP2Component::save_global_zone_to_sensor(uint8_t sensitivity) {
   save_error_.clear();
   enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, sensitivity);
   pending_save_attr_ids_.push_back(AttrId::PRESENCE_DETECT_SENSITIVITY);
+
+  // RUN-02 (09-03): persist to NVS so this survives a host reboot without a
+  // reflash. Only reached on the all-valid path (after the enqueue above) -
+  // a rejected input never persists.
+  save_global_zone_override_(sensitivity);
 }
 
 // Returns 0-15 for a valid hex digit, -1 otherwise. Avoids pulling in
@@ -440,13 +486,15 @@ static int fp2_hex_nibble_(char c) {
   return -1;
 }
 
-// RUN-01 (09-02): live scoped-to-one-zone save (grid + sensitivity +
+// RUN-01 (09-02/09-03): live scoped-to-one-zone save (grid + sensitivity +
 // zone_type) for an already-compiled zone. All validation (V5) happens here,
 // before any enqueue_command_ call - this is the first full-payload
 // runtime-writable input reaching a live UART write in this codebase.
 // Replicates check_initialization_()'s per-zone register sequence
 // (fp2_component.cpp ~594-611) scoped to ONE zone; does NOT resend
-// ZONE_ACTIVATION_LIST (D-04) and does NOT attempt a read-back (D-03).
+// ZONE_ACTIVATION_LIST (D-04) and does NOT attempt a read-back (D-03). On
+// the valid path also persists to NVS (save_zone_override_(), 09-03) so the
+// value survives a host reboot without a reflash.
 void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_hex,
                                         uint8_t sensitivity, int zone_type) {
   // (a) zone_id must match an actually-compiled zone (Pitfall 2) - a linear
@@ -541,8 +589,10 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
                     (uint16_t)((zone_id << 8) | 1));
   pending_save_attr_ids_.push_back(AttrId::ZONE_CLOSE_AWAY_ENABLE);
 
-  // TODO(09-03): persist this override via save_zone_override_() (NVS) so it
-  // survives a host reboot without a reflash - not wired yet in this plan.
+  // RUN-02 (09-03): persist to NVS so this survives a host reboot without a
+  // reflash. Only reached on the all-valid path (after all enqueues above) -
+  // a rejected input never persists.
+  save_zone_override_(zone_id, grid, sensitivity, zone_type);
 }
 
 void FP2LocationSwitch::write_state(bool state) {

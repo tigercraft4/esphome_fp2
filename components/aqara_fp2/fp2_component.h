@@ -257,6 +257,28 @@ struct FP2Command {
   uint8_t retry_count;
 };
 
+// RUN-02/RUN-04 (09-03): NVS-persisted overrides for per-zone and Global
+// Zone save-to-sensor values (D-05 - one NVS entry per compiled zone plus
+// one distinct entry for the Global Zone). Packed so save()/load() write and
+// read a stable byte layout via ESPHome's standard
+// global_preferences->make_preference<T>(fnv1_hash(...)) mechanism (09-
+// RESEARCH.md Pattern 4) - no raw NVS/SPIFFS, no hand-rolled hashing. Bump
+// FP2_OVERRIDE_VERSION if this layout ever changes; a version mismatch at
+// load time is treated as "no override" (T-09-08).
+struct FP2ZoneOverride {
+  uint32_t version;
+  GridMap grid;
+  uint8_t sensitivity;  // 1..3
+  int16_t zone_type;    // -1 = not set, else a ZONE_TYPES value (0-255 range)
+} __attribute__((packed));
+
+struct FP2GlobalZoneOverride {
+  uint32_t version;
+  uint8_t presence_sensitivity;  // 1..3
+} __attribute__((packed));
+
+static const uint32_t FP2_OVERRIDE_VERSION = 1;
+
 class FP2LocationSwitch : public switch_::Switch {
 public:
   void set_parent(FP2Component *parent) { parent_ = parent; }
@@ -470,12 +492,12 @@ public:
   JsonDocument get_map_config_json();
   void json_get_map_data(JsonObject root);
 
-  // RUN-04 (09-01): live single-register Global Zone save + ACK-feedback
-  // batch-completion accessors. NVS persistence (save_global_zone_override_)
-  // is wired in 09-03 - this method only performs the live write + ACK
-  // tracking.
+  // RUN-04 (09-01/09-03): live single-register Global Zone save + ACK-
+  // feedback batch-completion accessors. On the valid path also persists to
+  // NVS (save_global_zone_override_(), 09-03) so the value survives a host
+  // reboot without a reflash.
   void save_global_zone_to_sensor(uint8_t sensitivity);
-  // RUN-01 (09-02): live scoped-to-one-zone write (grid + sensitivity +
+  // RUN-01 (09-02/09-03): live scoped-to-one-zone write (grid + sensitivity +
   // zone_type) for an already-compiled zone, bundled as one write the radar
   // ACKs (D-02). All parameters are validated server-side (V5) before any
   // enqueue: zone_id must match an actual compiled entry in zones_ (not a
@@ -484,9 +506,9 @@ public:
   // characters. Reuses the same pending_save_attr_ids_ batch 09-01
   // established - up to 4 registers this time (ZONE_MAP, ZONE_SENSITIVITY,
   // DETECT_ZONE_TYPE if set, ZONE_CLOSE_AWAY_ENABLE). Does NOT resend
-  // ZONE_ACTIVATION_LIST (D-04). NVS persistence (save_zone_override_) is
-  // wired in 09-03 - this method only performs the live write + ACK
-  // tracking.
+  // ZONE_ACTIVATION_LIST (D-04). On the valid path also persists to NVS
+  // (save_zone_override_(), 09-03) so the value survives a host reboot
+  // without a reflash.
   void save_zone_to_sensor(uint8_t zone_id, const std::string &grid_hex, uint8_t sensitivity,
                             int zone_type);
   // Read by the wait_until: condition lambda and api.respond lambdas in the
@@ -537,6 +559,22 @@ protected:
   // Initialization
   void perform_reset_();
   void check_initialization_();
+
+  // RUN-02/RUN-04 (09-03): NVS override load/save helpers (09-RESEARCH.md
+  // Pattern 4). load_* returns false (treated as "no override, use the
+  // compiled default") on a missing entry OR a version mismatch.
+  //
+  // Known limitation (09-RESEARCH.md Open Question 2, out of scope for
+  // RUN-02): an override is keyed by numeric zone_id only - if the zones:
+  // YAML list is reordered across a reflash, a saved override could be
+  // re-applied to a different physical zone than the one it was saved for.
+  // Not handled this phase (T-09-10, accepted) - solo single-device project
+  // where zone-list reordering across reflashes is rare and user-controlled.
+  bool load_zone_override_(uint8_t zone_id, FP2ZoneOverride *out);
+  void save_zone_override_(uint8_t zone_id, const GridMap &grid, uint8_t sensitivity,
+                            int zone_type);
+  bool load_global_zone_override_(FP2GlobalZoneOverride *out);
+  void save_global_zone_override_(uint8_t presence_sensitivity);
 
   aqara_fp2_accel::AqaraFP2Accel *fp2_accel_{nullptr};
 
