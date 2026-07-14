@@ -212,6 +212,15 @@ aqara_fp2:
   location_report_switch:
     name: "Report Targets"
 
+  # PROTO-04 (D-04): switches the radar between its three factory-preinstalled
+  # firmware images via plain WORK_MODE writes only - no OTA, no firmware
+  # flashing. Options: "Zone Detection" (WORK_MODE=3, default), "Fall
+  # Detection" (WORK_MODE=8, required for the fall_detected sensor above to
+  # ever report), "Sleep Monitoring" (WORK_MODE=9, via configure_sleep_mode()
+  # sequencing). Non-persistent this phase - always boots into Zone Detection.
+  # operating_mode:
+  #   name: "Operating Mode"
+
   # 14x14 Grid (Active Area)
   interference_grid: |-
     . . . . . . . . . . . . . .
