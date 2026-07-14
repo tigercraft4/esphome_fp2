@@ -92,6 +92,7 @@ const char* FP2Component::attr_id_to_string_(AttrId attr_id) {
     case AttrId::FALL_DELAY_TIME: return "fall_delay_time";
     case AttrId::DEBUG_LOG: return "debug_log";
     case AttrId::ZONE_ACTIVATION_LIST: return "aux_data";
+    case AttrId::SLEEP_HEARTBEAT_SYNC: return "sleep_heartbeat_sync";
     case AttrId::RADAR_FLASH_ID: return "radar_flash_id";
     case AttrId::RADAR_ID: return "radar_id";
     case AttrId::RADAR_CALIBRATION_RESULT: return "radar_calibration_result";
@@ -316,6 +317,15 @@ void FP2Component::configure_sleep_mode(uint16_t width, uint16_t length, uint8_t
   enqueue_command_(OpCode::WRITE, AttrId::SLEEP_REPORT_ENABLE, true);
   enqueue_command_blob2_(AttrId::ZONE_MAP, empty_zone);
   enqueue_command_(OpCode::WRITE, AttrId::WORK_MODE, (uint8_t) 9);
+
+  // PROTO-02: seed the heartbeat keepalive on sleep-mode entry. Reset the
+  // counter and send one immediate 0x0203=0 sync, matching the reference
+  // fork's behavior; subsequent writes are piggybacked on each inbound
+  // RADAR_SW_VERSION heartbeat (see handle_report_()).
+  sleep_mode_active_ = true;
+  sleep_heartbeat_counter_ = 0;
+  enqueue_command_(OpCode::WRITE, AttrId::SLEEP_HEARTBEAT_SYNC, (uint8_t) 0);
+
   enqueue_command_blob2_(AttrId::ZONE_MAP, empty_zone);
   enqueue_command_(OpCode::WRITE, AttrId::LOCATION_REPORT_ENABLE, true);
   enqueue_command_(OpCode::WRITE, AttrId::SLEEP_ZONE_SIZE, zone_size);
@@ -829,6 +839,13 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
   switch (attr_id) {
     case AttrId::RADAR_SW_VERSION:  // Heartbeat
       last_heartbeat_millis_ = millis();
+      // PROTO-02: keep the radar's sleep state machine alive during extended
+      // sleep/vitals sessions by piggybacking an incrementing 0x0203 write on
+      // every heartbeat report while sleep mode is active.
+      if (sleep_mode_active_ && init_done_) {
+        enqueue_command_(OpCode::WRITE, AttrId::SLEEP_HEARTBEAT_SYNC,
+                         (uint8_t) sleep_heartbeat_counter_++);
+      }
       if (payload.size() == 4 && payload[2] == 0x00) {
         auto ver_str = std::to_string(payload[3]);
         if (radar_software_sensor_ != nullptr) {

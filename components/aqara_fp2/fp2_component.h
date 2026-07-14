@@ -186,6 +186,8 @@ enum class AttrId : uint16_t {
     ZONE_MAP                        = 0x0114, // Zone N area map (1B ID + 40B)
     ZONE_SENSITIVITY                = 0x0151, // Zone N sensitivity
     ZONE_ACTIVATION_LIST            = 0x0202, // Auxiliary config (32B)
+    SLEEP_HEARTBEAT_SYNC            = 0x0203, // Incrementing u8 counter, WRITE on every heartbeat
+                                                // while in sleep/vitals work mode (WORK_MODE=9).
     DETECT_ZONE_TYPE                = 0x0152, // Zone N type
     DEVICE_DIRECTION                = 0x0143,
     ANGLE_SENSOR_DATA               = 0x0120,
@@ -540,6 +542,13 @@ protected:
   uint32_t last_command_sent_millis_{0};
   static const uint32_t ACK_TIMEOUT_MS = 500;
   static const uint8_t MAX_RETRIES = 3;
+
+  // Sleep-mode heartbeat keepalive (PROTO-02). Internal-only, no config toggle:
+  // gated on sleep_mode_active_, set true by configure_sleep_mode(). Stock firmware
+  // expects an incrementing 0x0203 WRITE on every radar heartbeat while in sleep/
+  // vitals mode (WORK_MODE=9), or its sleep state machine gets stuck.
+  bool sleep_mode_active_{false};
+  uint8_t sleep_heartbeat_counter_{0};
 
   void enqueue_command_(OpCode type, AttrId attr_id, uint8_t byte_val);
   void enqueue_command_(OpCode type, AttrId attr_id, uint16_t word_val);
