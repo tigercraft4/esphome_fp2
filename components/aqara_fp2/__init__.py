@@ -58,6 +58,10 @@ CONF_MOTION_TIMEOUT = "motion_timeout"
 CONF_ZONE_TYPE = "zone_type"
 CONF_TARGET_COUNT = "target_count"
 CONF_NEAREST_DISTANCE = "nearest_distance"
+# SENSE-01 (08-01): per-zone people count, decoded from ZONE_PEOPLE_NUMBER
+# (0x0175). Deliberately distinct from CONF_PEOPLE_COUNTING (0x0155) below,
+# which is an unrelated top-level text_sensor stream.
+CONF_PEOPLE_COUNT = "people_count"
 
 # New Options
 CONF_RADAR_RESET_PIN = "radar_reset_pin"
@@ -210,6 +214,11 @@ ZONE_SCHEMA = (
             cv.Optional(CONF_MOTION_TIMEOUT, default="5s"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_ZONE_TYPE): cv.enum(ZONE_TYPES),
             cv.Optional("zone_map_sensor"): text_sensor_.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+            cv.Optional(CONF_PEOPLE_COUNT): sensor.sensor_schema(
+                icon="mdi:account-group",
+                accuracy_decimals=0,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
         }
     ).extend(ZONE_BASE_SCHEMA)
 )
@@ -371,6 +380,7 @@ SENSOR_MAP = {
 ZONE_SENSOR_MAP = {
     CONF_PRESENCE: (binary_sensor.new_binary_sensor, "set_presence_sensor"),
     CONF_MOTION: (binary_sensor.new_binary_sensor, "set_motion_sensor"),
+    CONF_PEOPLE_COUNT: (sensor.new_sensor, "set_people_count_sensor"),
 
     # Text config sensors
     "zone_map_sensor": (text_sensor_.new_text_sensor, "set_map_sensor"),
