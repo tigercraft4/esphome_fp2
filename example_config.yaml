@@ -206,6 +206,17 @@ aqara_fp2:
   # fall_detected:
   #   name: "Fall Detected"
 
+  # Surfaces FALL_OVERTIME_REPORT (0x0136), distinct from 0x0134
+  # (fall_overtime_report_period) and 0x0135 (fall_overtime_detection),
+  # which are config/enable attributes, not this report. NOTE: per
+  # reverse-engineering an independent fork, this SubID's stock-firmware
+  # handler may be an inert 3-byte stub and may never fire — the sensor
+  # registers and parses safely either way (malformed/short payloads are
+  # routed to radar_debug, not treated as an error). Optional; live-fire
+  # confirmation on real hardware is a deferred, non-blocking follow-up.
+  # fall_overtime:
+  #   name: "Fall Overtime"
+
   target_tracking:
     name: "Targets"
 

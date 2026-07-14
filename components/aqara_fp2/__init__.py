@@ -89,6 +89,10 @@ CONF_SLEEP_DATA = "sleep_data"
 CONF_SLEEP_PRESENCE = "sleep_presence"
 CONF_SLEEP_INOUT_STATE = "sleep_inout_state"
 CONF_FALL_DETECTED = "fall_detected"
+# SENSE-02 (08-02): FALL_OVERTIME_REPORT (0x0136) event report, distinct from
+# the 0x0134/0x0135 config attributes. May be an inert stub on stock
+# firmware per an independent fork's reverse-engineering - opt-in.
+CONF_FALL_OVERTIME = "fall_overtime"
 CONF_SLEEP_STATE = "sleep_state"
 CONF_SLEEP_EVENT = "sleep_event"
 CONF_TARGET_POSTURE = "target_posture"
@@ -326,6 +330,10 @@ CONFIG_SCHEMA = (
                 device_class=DEVICE_CLASS_SAFETY,
                 icon="mdi:human-cane",
             ),
+            cv.Optional(CONF_FALL_OVERTIME): binary_sensor.binary_sensor_schema(
+                device_class=DEVICE_CLASS_SAFETY,
+                icon="mdi:clock-alert",
+            ),
             cv.Optional(CONF_SLEEP_DATA): text_sensor_.text_sensor_schema(
                 icon="mdi:sleep",
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -367,6 +375,7 @@ SENSOR_MAP = {
     CONF_SLEEP_PRESENCE: (binary_sensor.new_binary_sensor, "set_sleep_presence_sensor"),
     CONF_SLEEP_INOUT_STATE: (binary_sensor.new_binary_sensor, "set_sleep_inout_sensor"),
     CONF_FALL_DETECTED: (binary_sensor.new_binary_sensor, "set_fall_detected_sensor"),
+    CONF_FALL_OVERTIME: (binary_sensor.new_binary_sensor, "set_fall_overtime_sensor"),
     CONF_LOCATION_REPORT_SWITCH: (switch.new_switch, "set_location_report_switch"),
     CONF_TARGET_TRACKING: (text_sensor_.new_text_sensor, "set_target_tracking_sensor"),
 
