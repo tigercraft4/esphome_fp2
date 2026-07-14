@@ -17,6 +17,7 @@ A user can draw a zone by painting cells on the grid and get a valid `zones:` YA
 **Target features:**
 - **Protocol fix:** host-initiated reads (`fp2_read_attr`) use the correct wire opcode (`0x01` request / `0x04` response, fire-and-forget) instead of the wrong one this codebase shipped with — resolves the Phase 6 spike's 5/5 reproducible read timeouts
 - Sleep-mode `0x0203` heartbeat keepalive; corrected fall-detection SubID mapping (`0x0121`/`0x0179`/`0x0180`)
+- Real `operating_mode` select (Zone Detection/Fall Detection/Sleep Monitoring) via plain `WORK_MODE` writes — added mid-Phase-7 once research confirmed it needs no radar firmware flashing (the three firmware images are factory-preinstalled; only *replacing* them, not switching between them, needs the still-excluded OTA subsystem)
 - New sensors: per-zone people count (`ZONE_PEOPLE_NUMBER`), `FALL_OVERTIME_REPORT`
 - Diagnostics: `debug_mode` verbose logging, optional telnet raw-UART bridge (default off)
 - Live write path for editing an existing compiled zone's grid/sensitivity/type (proven mechanics: `enqueue_command_blob2_`, `fp2_write_attr_uint8`, ACK-confirmed) plus the Global Zone
