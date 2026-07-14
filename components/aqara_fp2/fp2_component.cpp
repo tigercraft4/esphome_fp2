@@ -408,6 +408,29 @@ void FP2Component::set_interference_auto_enabled(bool enabled) {
   enqueue_command_(OpCode::WRITE, AttrId::INTERFERENCE_AUTO_ENABLE, enabled);
 }
 
+// RUN-04 (09-01): live single-register Global Zone presence_sensitivity save.
+// Write-and-forget (D-03) - ACK-of-write is the only success signal, no
+// read-back attempted. NVS persistence (save_global_zone_override_) is
+// wired in 09-03; this method's job here is the live write + registering
+// the write in the pending-save batch so the new HA action's wait_until:
+// condition (save_pending()) can observe real completion.
+void FP2Component::save_global_zone_to_sensor(uint8_t sensitivity) {
+  // V5: validate before any enqueue - out-of-range input never reaches the UART.
+  if (sensitivity < 1 || sensitivity > 3) {
+    ESP_LOGW(TAG, "save_global_zone_to_sensor: invalid sensitivity %u (must be 1-3)", sensitivity);
+    save_failed_ = true;
+    save_error_ = std::string("invalid sensitivity ") + std::to_string(sensitivity) +
+                  " (must be 1-3)";
+    return;
+  }
+
+  ESP_LOGI(TAG, "Queueing Global Zone presence_sensitivity save = %u", sensitivity);
+  save_failed_ = false;
+  save_error_.clear();
+  enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, sensitivity);
+  pending_save_attr_ids_.push_back(AttrId::PRESENCE_DETECT_SENSITIVITY);
+}
+
 void FP2LocationSwitch::write_state(bool state) {
   if (this->parent_ != nullptr) {
     this->parent_->set_location_reporting_enabled(state);
