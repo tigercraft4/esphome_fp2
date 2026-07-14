@@ -194,6 +194,10 @@ aqara_fp2:
   dwell_time_enable: false
   walking_distance_enable: false
   thermodynamic_chart_enable: true
+  # debug_mode: dumps the full hex of EVERY TX/RX frame to the logs (verbose) for
+  # protocol reverse-engineering, beyond the existing radar_debug diagnostics.
+  # Default false = current radar_debug-only behavior, byte-for-byte unchanged.
+  # debug_mode: true
   # Optional feature streams. Enable only when you want to experiment with them.
   # sleep_report_enable: true
   # posture_report_enable: true

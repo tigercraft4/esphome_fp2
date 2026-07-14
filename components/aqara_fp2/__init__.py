@@ -101,6 +101,7 @@ CONF_GLOBAL_ZONE = "global_zone"
 CONF_RADAR_SOFTWARE_VERSION = "radar_software_version"
 CONF_RADAR_DEBUG = "radar_debug"
 CONF_DEBUG_PROBE_READS = "debug_probe_reads"
+CONF_DEBUG_MODE = "debug_mode"
 
 MOUNTING_POSITIONS = {
     "wall": 0x01,
@@ -280,6 +281,7 @@ CONFIG_SCHEMA = (
                 }
             ),
             cv.Optional(CONF_DEBUG_PROBE_READS, default=False): cv.boolean,
+            cv.Optional(CONF_DEBUG_MODE, default=False): cv.boolean,
             cv.Optional(CONF_RADAR_TEMPERATURE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_CELSIUS,
                 icon=ICON_THERMOMETER,
@@ -431,6 +433,7 @@ async def to_code(config):
     cg.add(var.set_mounting_position(config[CONF_MOUNTING_POSITION]))
     cg.add(var.set_left_right_reverse(config[CONF_LEFT_RIGHT_REVERSE]))
     cg.add(var.set_debug_probe_reads(config[CONF_DEBUG_PROBE_READS]))
+    cg.add(var.set_debug_mode(config[CONF_DEBUG_MODE]))
     cg.add(var.set_people_counting_report_enable(config[CONF_PEOPLE_COUNTING_REPORT_ENABLE]))
     cg.add(var.set_people_number_enable(config[CONF_PEOPLE_NUMBER_ENABLE]))
     cg.add(var.set_target_type_enable(config[CONF_TARGET_TYPE_ENABLE]))
