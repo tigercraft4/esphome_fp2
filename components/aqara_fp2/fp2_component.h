@@ -42,6 +42,10 @@ struct FP2Zone : public Component {
     this->map_sensor = sensor;
   }
 
+  void set_people_count_sensor(sensor::Sensor *sensor) {
+    this->people_count_sensor = sensor;
+  }
+
   void publish_presence(bool state) {
     if (this->presence_sensor != nullptr) {
       this->presence_sensor->publish_state(state);
@@ -57,6 +61,12 @@ struct FP2Zone : public Component {
   void publish_map(const std::string &map_hex) {
     if (this->map_sensor != nullptr) {
       this->map_sensor->publish_state(map_hex);
+    }
+  }
+
+  void publish_people_count(uint8_t count) {
+    if (this->people_count_sensor != nullptr) {
+      this->people_count_sensor->publish_state(count);
     }
   }
 
@@ -96,6 +106,7 @@ struct FP2Zone : public Component {
   esphome::binary_sensor::BinarySensor *presence_sensor{nullptr};
   esphome::binary_sensor::BinarySensor *motion_sensor{nullptr};
   esphome::text_sensor::TextSensor *map_sensor{nullptr};
+  esphome::sensor::Sensor *people_count_sensor{nullptr};
   GridMap grid;
   uint8_t sensitivity; // 1=Low, 2=Med, 3=High
   uint32_t motion_timeout_ms{5000};
@@ -211,6 +222,9 @@ enum class AttrId : uint16_t {
     LOCATION_REPORT_ENABLE          = 0x0112,
     RESET_ABSENT_STATUS             = 0x0113,
     ZONE_PRESENCE                   = 0x0142,
+    // SENSE-01 (08-01): per-zone people count report. Payload shape matches
+    // ZONE_PRESENCE: [SubID 2B] [Type 0x01(UINT16)] [ZoneID] [Count].
+    ZONE_PEOPLE_NUMBER              = 0x0175,
     LOCATION_TRACKING_DATA          = 0x0117,
     THERMO_EN                       = 0x0138,
     THERMO_DATA                     = 0x0141,

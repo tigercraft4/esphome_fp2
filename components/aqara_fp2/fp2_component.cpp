@@ -58,6 +58,7 @@ const char* FP2Component::attr_id_to_string_(AttrId attr_id) {
     case AttrId::INTERFERENCE_AUTO_ENABLE: return "interference_auto_enable";
     case AttrId::THERMO_DATA: return "thermodynamic_chart_data";
     case AttrId::ZONE_PRESENCE: return "detect_zone_presence";
+    case AttrId::ZONE_PEOPLE_NUMBER: return "zone_people_number";
     case AttrId::DEVICE_DIRECTION: return "device_direction";
     case AttrId::EDGE_AUTO_SETTING: return "edge_auto_setting";
     case AttrId::EDGE_AUTO_ENABLE: return "edge_auto_enable";
@@ -1003,6 +1004,25 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             }
             break;
         }
+
+    case AttrId::ZONE_PEOPLE_NUMBER:  // Zone People Count (SENSE-01, 08-01)
+        // Payload: [SubID 2B] [Type 0x01(UINT16)] [ValH] [ValL]
+        // ValH = ZoneID, ValL = Count
+        if (payload.size() >= 5 && payload[2] == 0x01) {
+            uint8_t zone_id = payload[3];
+            uint8_t count = payload[4];
+            ESP_LOGD(TAG, "Zone People Count Report: Zone %d = %u", zone_id, count);
+
+            for (auto &z : zones_) {
+                if (z->id == zone_id) {
+                    z->publish_people_count(count);
+                    break;
+                }
+            }
+            break;
+        }
+        publish_radar_debug_("zone_people_number_malformed", attr_id, payload);
+        break;
 
     case AttrId::LOCATION_TRACKING_DATA:  // Location Tracking Data
       handle_location_tracking_report_(payload);
