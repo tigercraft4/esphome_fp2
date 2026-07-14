@@ -385,6 +385,36 @@ void FP2LocationSwitch::write_state(bool state) {
   this->publish_state(state);
 }
 
+// PROTO-04 (D-04): operating_mode select control() reuses the existing,
+// hardware-confirmed WORK_MODE write path (set_work_mode()) directly - no
+// parallel write path, no mcu_ota/XMODEM. Sleep Monitoring routes through
+// configure_sleep_mode() so the companion sleep-zone params +
+// SLEEP_REPORT_ENABLE precede the WORK_MODE=9 write, per PROTO-02b's
+// write-order fix. Only the three known option strings are honored; any
+// other value is ignored (the ESPHome select platform already constrains
+// inputs to the registered options list - this is defense in depth).
+void FP2OperatingModeSelect::control(const std::string &value) {
+  if (this->parent_ == nullptr) {
+    return;
+  }
+
+  if (value == OPERATING_MODE_ZONE_DETECTION) {
+    this->parent_->set_work_mode(3);
+  } else if (value == OPERATING_MODE_FALL_DETECTION) {
+    this->parent_->set_work_mode(8);
+  } else if (value == OPERATING_MODE_SLEEP_MONITORING) {
+    // Defaults match the documented, hardware-confirmed "stock capture"
+    // sleep setup (README.md fp2_configure_sleep_mode: width=120,
+    // length=180, mount_position=1).
+    this->parent_->configure_sleep_mode(120, 180, 1);
+  } else {
+    ESP_LOGW(TAG, "operating_mode select: ignoring unknown option '%s'", value.c_str());
+    return;
+  }
+
+  this->publish_state(value);
+}
+
 void FP2Component::loop() {
   while (available()) {
     uint8_t byte;
