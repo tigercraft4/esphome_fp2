@@ -260,6 +260,13 @@ sensor:
   # the direct empirical read on whether HTTP/SSE handling blocks the main
   # loop long enough to threaten the >4.6ms UART RX overrun threshold.
   - platform: debug
+    # WR-02: the debug: platform defaults to a 60s PollingComponent update
+    # interval, but heap_fragmentation (below) recomputes from heap_free/
+    # heap_block every 10s - without this override, 5 of every 6 samples
+    # were mathematically identical re-computations of stale data, implying
+    # finer time resolution than the D-11 RAM/fragmentation read actually
+    # had. Set to match heap_min_free's genuine 10s refresh cadence.
+    update_interval: 10s
     free:
       name: "Heap Free"
       id: heap_free
