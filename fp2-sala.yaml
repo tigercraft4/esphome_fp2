@@ -314,7 +314,11 @@ interval:
     then:
       - sensor.template.publish:
           id: spike_counter
-          state: !lambda "return id(spike_counter).state + 1;"
+          # WR-01: a template sensor's initial state is NAN
+          # (Sensor::Sensor() : state(NAN)), and NaN + 1 == NaN under
+          # IEEE-754, so without this guard the counter is stuck at "NA" in
+          # HA forever instead of incrementing as a visible SSE heartbeat.
+          state: !lambda "return isnan(id(spike_counter).state) ? 0 : id(spike_counter).state + 1;"
   - interval: 60s
     then:
       - lambda: |-
