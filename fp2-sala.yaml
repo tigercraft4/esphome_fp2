@@ -1,5 +1,17 @@
+# SPIKE-01 (D-08/D-09/D-10, phase 10-01): includes: pulls in the temporary
+# SpikeHandler route handler; on_boot: priority -100 registers it on base_ws
+# after web_server setup completes (Pitfall 3) so add_handler() doesn't race
+# web_server_base's own init(). Both entries are removed after the soak
+# regardless of go/no-go verdict.
 esphome:
   name: fp2-sala
+  includes:
+    - spike_handler.h
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(base_ws)->add_handler(new SpikeHandler());
 
 esp32:
   board: esp32-solo1
@@ -30,10 +42,17 @@ wifi:
 
 captive_portal:
 
+# SPIKE-01/D-09 (phase 10-01): explicit web_server_base: id so the temporary
+# SpikeHandler /spike route (D-08) can be registered via add_handler() from
+# esphome: on_boot: above. Temporary, removed after the soak (D-10).
+web_server_base:
+  id: base_ws
+
 # Local diagnostics page on the device IP (http://<device-ip>/).
 # version 2 is embedded/offline-friendly and light on the SOLO-1.
 # Add an `auth:` block if you want to password-protect it.
 web_server:
+  web_server_base_id: base_ws
   port: 80
   version: 2
 
