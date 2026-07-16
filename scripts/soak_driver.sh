@@ -48,7 +48,14 @@ cleanup() {
     kill "$pid" 2>/dev/null || true
   done
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+# CR-01: a signal handler registered via `trap` suppresses bash's default
+# terminating behavior for that signal - the handler runs but execution then
+# resumes at the point of interruption unless the handler calls `exit`
+# explicitly. Without these, Ctrl-C/SIGTERM only killed the SSE holders while
+# the foreground poll loop below kept running forever.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "Starting 2 persistent SSE holders against http://${HOST}/events (D-05/D-07)..." >&2
 curl -N "http://${HOST}/events" >"$SSE_LOG_1" 2>&1 &
