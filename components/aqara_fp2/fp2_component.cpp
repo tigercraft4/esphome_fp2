@@ -700,7 +700,18 @@ void FP2Component::check_initialization_() {
     enqueue_command_(OpCode::WRITE, AttrId::MONITOR_MODE, (uint8_t) 0);
     enqueue_command_(OpCode::WRITE, AttrId::LEFT_RIGHT_REVERSE,
                      (uint8_t)(left_right_reverse_ ? 2 : 0));
-    enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, global_presence_sensitivity_);
+    // RUN-04 (09-03): resolve the Global Zone's effective sensitivity from a
+    // saved NVS override, if present, BEFORE the write below - falls back to
+    // the compiled default when no override exists.
+    uint8_t effective_global_sensitivity = global_presence_sensitivity_;
+    FP2GlobalZoneOverride gov;
+    if (load_global_zone_override_(&gov)) {
+      ESP_LOGI(TAG, "Global Zone: applying saved NVS override (presence_sensitivity=%u) "
+                    "instead of compiled default (%u)",
+               gov.presence_sensitivity, global_presence_sensitivity_);
+      effective_global_sensitivity = gov.presence_sensitivity;
+    }
+    enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, effective_global_sensitivity);
     enqueue_command_(OpCode::WRITE, AttrId::CLOSING_SETTING, (uint8_t) 1);
     enqueue_command_(OpCode::WRITE, AttrId::ZONE_CLOSE_AWAY_ENABLE, (uint16_t) 0x0001);
     // PROTO-03 (2026-07-14): 0x0121 is report-only (fall event, not a
@@ -756,21 +767,40 @@ void FP2Component::check_initialization_() {
     // 3. Zones
     std::vector<uint8_t> activations(32, 0);
     for (const auto &zone : zones_) {
+      // RUN-02 (09-03): resolve grid/sensitivity/zone_type into LOCAL
+      // variables from a saved NVS override, if present, BEFORE building any
+      // of this zone's register payloads below (09-RESEARCH.md Pitfall 4 -
+      // the override must win before the first enqueue, not as a follow-up
+      // correction, or the radar gets a redundant second ZONE_MAP write).
+      // Falls back to the compiled defaults when no override exists.
+      GridMap grid = zone->grid;
+      uint8_t sensitivity = zone->sensitivity;
+      int zone_type = zone->has_zone_type ? (int) zone->zone_type : -1;
+
+      FP2ZoneOverride ov;
+      if (load_zone_override_(zone->id, &ov)) {
+        ESP_LOGI(TAG, "Zone %u: applying saved NVS override instead of compiled default",
+                 zone->id);
+        grid = ov.grid;
+        sensitivity = ov.sensitivity;
+        zone_type = ov.zone_type;
+      }
+
       // a. Send Zone Detect Setting (0x0114)
       // Structure: [ZoneID] [40 byte Map]
       std::vector<uint8_t> payload;
       payload.push_back(zone->id);
-      payload.insert(payload.end(), zone->grid.begin(), zone->grid.end());
+      payload.insert(payload.end(), grid.begin(), grid.end());
       enqueue_command_blob2_(AttrId::ZONE_MAP, payload);
 
       // b. Send Sensitivity (0x0151)
       // Structure: UINT16 (High=ID, Low=Sens)
-      uint16_t sens_val = (zone->id << 8) | (zone->sensitivity & 0xFF);
+      uint16_t sens_val = (zone->id << 8) | (sensitivity & 0xFF);
       enqueue_command_(OpCode::WRITE, AttrId::ZONE_SENSITIVITY, sens_val);
 
-      // c. Send Zone Type (0x0152) if configured: UINT16 (High=ID, Low=Type)
-      if (zone->has_zone_type) {
-        uint16_t type_val = (zone->id << 8) | (zone->zone_type & 0xFF);
+      // c. Send Zone Type (0x0152) if resolved: UINT16 (High=ID, Low=Type)
+      if (zone_type >= 0) {
+        uint16_t type_val = (zone->id << 8) | ((uint8_t) zone_type & 0xFF);
         enqueue_command_(OpCode::WRITE, AttrId::DETECT_ZONE_TYPE, type_val);
       }
 
