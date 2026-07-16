@@ -256,6 +256,72 @@ sensor:
     address: 0x44
     update_interval: 30s
 
+  # SPIKE-01/D-04 (phase 10-01, temporary/D-10): stock debug: sensors give
+  # the direct empirical read on whether HTTP/SSE handling blocks the main
+  # loop long enough to threaten the >4.6ms UART RX overrun threshold.
+  - platform: debug
+    free:
+      name: "Heap Free"
+      id: heap_free
+    block:
+      name: "Heap Max Block"
+      id: heap_block
+    loop_time:
+      name: "Loop Time"
+      id: heap_loop_time
+
+  # SPIKE-01/D-11 (phase 10-01, temporary/D-10): min_free/fragmentation
+  # don't exist as native debug: keys at the pinned esphome>=2025.12.4
+  # floor (Pitfall 1) - these two template sensors call the same raw
+  # ESP-IDF heap-caps API the future native sensors will wrap, giving
+  # exact parity without bumping the pin.
+  - platform: template
+    name: "Heap Min Free (derived)"
+    id: heap_min_free
+    update_interval: 10s
+    accuracy_decimals: 0
+    lambda: |-
+      // Source: esphome/esphome debug_esp32.cpp @ dev branch.
+      return (float) heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+
+  - platform: template
+    name: "Heap Fragmentation % (derived)"
+    id: heap_fragmentation
+    update_interval: 10s
+    accuracy_decimals: 1
+    lambda: |-
+      // Source: esphome/esphome debug_esp32.cpp @ dev branch - exact
+      // upstream formula.
+      float free_heap = id(heap_free).state;
+      float max_alloc = id(heap_block).state;
+      if (free_heap <= 0) return {};
+      return 100.0f - (100.0f * max_alloc / free_heap);
+
+  # SPIKE-01/D-05a/D-06 (phase 10-01, temporary/D-10): fast-changing entity
+  # that drives the reused built-in /events SSE endpoint - no bespoke
+  # AsyncEventSource (Pitfall 2). Published manually by the interval: below.
+  - platform: template
+    name: "Spike Counter"
+    id: spike_counter
+    update_interval: never
+    accuracy_decimals: 0
+
+# SPIKE-01/D-04/D-05a/D-06/D-11 (phase 10-01, temporary/D-10): drives the
+# 1s SSE-load counter bump (D-05a/D-06) and the 60s greppable spike_soak
+# log dump (D-04/D-11) for post-soak baseline/loaded comparison.
+interval:
+  - interval: 1s
+    then:
+      - sensor.template.publish:
+          id: spike_counter
+          state: !lambda "return id(spike_counter).state + 1;"
+  - interval: 60s
+    then:
+      - lambda: |-
+          ESP_LOGI("spike_soak", "free=%.0f block=%.0f min_free=%.0f frag=%.1f loop_time=%.1f",
+                   id(heap_free).state, id(heap_block).state, id(heap_min_free).state,
+                   id(heap_fragmentation).state, id(heap_loop_time).state);
+
 binary_sensor:
   - platform: gpio
     pin:
