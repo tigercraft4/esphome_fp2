@@ -305,6 +305,16 @@ const ZONE_TYPE_NAMES_BY_VALUE = Object.fromEntries(
 const SENSITIVITY_INT_TO_STRING_JS = { 1: "low", 2: "medium", 3: "high" };
 window.SENSITIVITY_INT_TO_STRING_JS = SENSITIVITY_INT_TO_STRING_JS;
 
+// Reverse lookup (string -> int) for Phase 9's Save to Sensor path, which
+// must send the protocol's raw sensitivity int (1/2/3) to the
+// fp2_save_zone_to_sensor/fp2_save_global_zone_to_sensor HA actions —
+// derived from SENSITIVITY_INT_TO_STRING_JS so the two mappings can never
+// drift out of sync (mirrors ZONE_TYPE_NAMES_BY_VALUE's derivation above).
+const SENSITIVITY_STRING_TO_INT_JS = Object.fromEntries(
+  Object.entries(SENSITIVITY_INT_TO_STRING_JS).map(([intVal, name]) => [name, parseInt(intVal, 10)]),
+);
+window.SENSITIVITY_STRING_TO_INT_JS = SENSITIVITY_STRING_TO_INT_JS;
+
 // Injection-safety chokepoint (Pitfall 6/ASVS V5) every zone export id
 // (the zone-id export resolver, Plan 04-03) routes through: a free-form
 // user-entered zone label must never reach a YAML `id:` scalar position
@@ -1004,6 +1014,165 @@ class AqaraFP2Card extends HTMLElement {
     );
   }
 
+  // Phase 9 Save to Sensor (RUN-01/RUN-03/RUN-04, 09-UI-SPEC.md "Interaction
+  // / scope-resolution logic" steps 1-3, the load-bearing contract this
+  // method implements verbatim):
+  //   1. zoneTarget = this.selectedLayer only if it's an existing compiled
+  //      device zone ("zone:<n>", never "zone:new:*" — locally-added zones
+  //      aren't compiled yet — and never the fixed interference/exit/edge
+  //      layers).
+  //   2. globalTarget = this.globalZoneMeta.presenceSensitivity, if set.
+  //   3. If neither is set, the caller shows the "nothing to save" guard.
+  // The zone:<n> -> protocol zone_id conversion happens in exactly ONE
+  // place, here: the card's zone:<n> key is 0-based, but the compiled
+  // zone's protocol zone_id is 1-based (Pitfall 1, __init__.py:417's
+  // `id: zone_{i + 1}` positional numbering). {zoneLabel} is read from the
+  // <select>'s current option text — the same lookup clearSelectedLayer()
+  // already uses — never re-derived from the raw zone:<n> key.
+  resolveSaveTargets() {
+    let zoneKey = null;
+    if (
+      typeof this.selectedLayer === "string" &&
+      this.selectedLayer.startsWith("zone:") &&
+      !this.selectedLayer.startsWith("zone:new:")
+    ) {
+      zoneKey = this.selectedLayer;
+    }
+
+    const globalSensitivity = this.globalZoneMeta.presenceSensitivity;
+
+    if (zoneKey === null && globalSensitivity === null) {
+      return { zoneKey: null, zoneId: null, zoneLabel: null, globalSensitivity: null };
+    }
+
+    let zoneId = null;
+    let zoneLabel = null;
+    if (zoneKey !== null) {
+      // Pitfall 1 (__init__.py:417): card zone:<n> is 0-based, compiled
+      // zone->id is 1-based protocol zone_id — convert once, here.
+      zoneId = parseInt(zoneKey.slice("zone:".length), 10) + 1;
+      const select = this.querySelector(".layer-select");
+      zoneLabel =
+        select && select.selectedIndex >= 0 && select.options[select.selectedIndex]
+          ? select.options[select.selectedIndex].textContent
+          : zoneKey;
+    }
+
+    return { zoneKey, zoneId, zoneLabel, globalSensitivity };
+  }
+
+  // Awaited service-call helper mirroring fetchMapConfig()'s
+  // hass.callService('esphome', service, {...}, undefined, undefined, true)
+  // shape (card.js:874) — calls the 09-02 fp2_save_zone_to_sensor HA action
+  // and returns the real ACK-gated outcome (never an optimistic guess).
+  async saveZoneToSensor(hass, deviceName, zoneId, gridHex, sensitivity, zoneType) {
+    const service = `${deviceName}_fp2_save_zone_to_sensor`;
+    try {
+      console.log(`[FP2 Card] Saving zone ${zoneId} to sensor via service: esphome.${service}`);
+      const response = await hass.callService(
+        "esphome",
+        service,
+        { zone_id: zoneId, grid_hex: gridHex, sensitivity, zone_type: zoneType },
+        undefined,
+        undefined,
+        true,
+      );
+      const result = (response && response.response) || {};
+      return { success: !!result.success, error: result.error_message };
+    } catch (e) {
+      console.error(`[FP2 Card] saveZoneToSensor failed:`, e);
+      return { success: false, error: String(e) };
+    }
+  }
+
+  // Awaited service-call helper mirroring fetchMapConfig()'s shape — calls
+  // the 09-01 fp2_save_global_zone_to_sensor HA action.
+  async saveGlobalZoneToSensor(hass, deviceName, sensitivity) {
+    const service = `${deviceName}_fp2_save_global_zone_to_sensor`;
+    try {
+      console.log(`[FP2 Card] Saving Global Zone sensitivity to sensor via service: esphome.${service}`);
+      const response = await hass.callService(
+        "esphome",
+        service,
+        { sensitivity },
+        undefined,
+        undefined,
+        true,
+      );
+      const result = (response && response.response) || {};
+      return { success: !!result.success, error: result.error_message };
+    } catch (e) {
+      console.error(`[FP2 Card] saveGlobalZoneToSensor failed:`, e);
+      return { success: false, error: String(e) };
+    }
+  }
+
+  // Phase 9 Save to Sensor (RUN-01/RUN-03/RUN-04, D-01/D-06/D-07/D-08):
+  // mirrors handleImportClick()'s async/await + window.alert() shape, but
+  // with NO window.confirm() gate — unlike Import, Save to Sensor never
+  // destroys or overwrites any local editor state (nothing is erased
+  // client-side), so it fires immediately on click (UI-SPEC step 4).
+  // Every user-facing string below is copied verbatim from 09-UI-SPEC.md's
+  // Copywriting Contract — the honest "applied, not verified" framing
+  // (D-06/D-07) must never be reworded to imply a confirmed/persisted/
+  // committed write the firmware can't back.
+  async handleSaveToSensorClick() {
+    const targets = this.resolveSaveTargets();
+
+    if (targets.zoneKey === null && targets.globalSensitivity === null) {
+      window.alert(
+        "Nothing to save — select an existing device zone, or set a Global Zone sensitivity, then try again.",
+      );
+      return;
+    }
+
+    const deviceName = this.config.entity_prefix.replace(/^[^.]+\./, "");
+    const hass = this._hass;
+    let zoneOk = null;
+    let globalOk = null;
+
+    if (targets.zoneKey !== null) {
+      const meta = this.getOrSeedZoneMeta(targets.zoneKey);
+      const gridHex = window.FP2Codec.gridToHex(this.editorState[targets.zoneKey]);
+      const sensitivity = SENSITIVITY_STRING_TO_INT_JS[meta.presenceSensitivity] || 2;
+      // Unset zoneType is null in editor state; the C++ side's sentinel for
+      // "leave zone_type unchanged" is -1 (09-02-SUMMARY.md).
+      const zoneType = meta.zoneType !== null ? meta.zoneType : -1;
+      const result = await this.saveZoneToSensor(
+        hass,
+        deviceName,
+        targets.zoneId,
+        gridHex,
+        sensitivity,
+        zoneType,
+      );
+      zoneOk = result.success;
+    }
+
+    if (targets.globalSensitivity !== null) {
+      const sensitivity = SENSITIVITY_STRING_TO_INT_JS[targets.globalSensitivity] || 2;
+      const result = await this.saveGlobalZoneToSensor(hass, deviceName, sensitivity);
+      globalOk = result.success;
+    }
+
+    if (zoneOk === false || globalOk === false) {
+      window.alert(
+        "Save to Sensor failed — the device didn't acknowledge the write in time. Nothing was confirmed applied; the sensor's prior configuration is unchanged. Check the device is online and try again.",
+      );
+      return;
+    }
+
+    let successMessage;
+    if (targets.zoneKey !== null && targets.globalSensitivity !== null) {
+      successMessage = `Saved "${targets.zoneLabel}" and Global Zone sensitivity to sensor. Applied immediately — not verified by a read-back (this firmware doesn't confirm reads). Will be restored automatically from this device's saved settings on every reboot.`;
+    } else if (targets.zoneKey !== null) {
+      successMessage = `Saved "${targets.zoneLabel}" to sensor. Applied immediately — not verified by a read-back (this firmware doesn't confirm reads). Will be restored automatically from this device's saved settings on every reboot.`;
+    } else {
+      successMessage = `Saved Global Zone sensitivity to sensor. Applied immediately — not verified by a read-back (this firmware doesn't confirm reads). Will be restored automatically from this device's saved settings on every reboot.`;
+    }
+    window.alert(successMessage);
+  }
+
   initializeCard() {
     this.innerHTML = `
       <ha-card>
@@ -1377,6 +1546,13 @@ class AqaraFP2Card extends HTMLElement {
     // Export YAML button — registered once here (Pattern 9/D-06).
     this.querySelector(".export-yaml-btn").addEventListener("click", () => {
       this.handleExportClick();
+    });
+
+    // Save to Sensor button — registered once here (Phase 9, RUN-01/RUN-03/
+    // RUN-04, D-01/D-08). No window.confirm() gate — see
+    // handleSaveToSensorClick()'s own comment for why.
+    this.querySelector(".save-to-sensor-btn").addEventListener("click", () => {
+      this.handleSaveToSensorClick();
     });
 
     // Import from Device button — registered once here (Phase 5, D-01).
