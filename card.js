@@ -1030,6 +1030,7 @@ class AqaraFP2Card extends HTMLElement {
             <button class="clear-layer-btn" title="Clear the currently selected layer">Clear Layer</button>
             <button class="add-zone-btn" title="Add a new local zone">+ Add Zone</button>
             <button class="export-yaml-btn" title="Build a zones:/global-grid YAML block from the current edits and copy it">Export YAML</button>
+            <button class="save-to-sensor-btn" title="Push the selected zone's grid, sensitivity, and type — plus Global Zone sensitivity, if set — live to the device. Applied immediately; not verified by a read-back on this firmware. Restored automatically on every reboot from this device's saved settings.">Save to Sensor</button>
             <button class="import-config-btn" title="Re-fetch the device's current config and merge it into the editor (overwrites global grids + existing zone grids/sensitivity; keeps locally-added zones)">Import from Device</button>
             <label class="global-zone-field">
               Global Zone
@@ -1225,6 +1226,20 @@ class AqaraFP2Card extends HTMLElement {
           font-weight: 500;
         }
         .editor-controls .export-yaml-btn:hover {
+          background: var(--primary-color);
+          color: var(--text-primary-color);
+        }
+        .editor-controls .save-to-sensor-btn {
+          background: none;
+          border: 1px solid var(--primary-color);
+          border-radius: 4px;
+          padding: 8px;
+          cursor: pointer;
+          color: var(--primary-color);
+          font-size: 14px;
+          font-weight: 500;
+        }
+        .editor-controls .save-to-sensor-btn:hover {
           background: var(--primary-color);
           color: var(--text-primary-color);
         }
