@@ -57,18 +57,35 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# CR-02: named so the poll loop below can restart a holder if it dies
+# mid-soak (transient WiFi blip, idle-socket purge, device reboot) without
+# silently degrading D-07's "2 concurrent SSE clients" condition for the
+# rest of an unattended multi-hour run.
+start_sse_holder() {
+  local idx="$1" logfile="$2"
+  curl -N "http://${HOST}/events" >"$logfile" 2>&1 &
+  SSE_PIDS[$idx]="$!"
+}
+
 echo "Starting 2 persistent SSE holders against http://${HOST}/events (D-05/D-07)..." >&2
-curl -N "http://${HOST}/events" >"$SSE_LOG_1" 2>&1 &
-SSE_PIDS+=("$!")
-curl -N "http://${HOST}/events" >"$SSE_LOG_2" 2>&1 &
-SSE_PIDS+=("$!")
+start_sse_holder 0 "$SSE_LOG_1"
+start_sse_holder 1 "$SSE_LOG_2"
 
 echo "SSE holder PIDs: ${SSE_PIDS[*]} (logs: $SSE_LOG_1, $SSE_LOG_2)" >&2
 echo "Polling http://${HOST}/spike every ${INTERVAL}s (D-02). Ctrl-C to stop cleanly." >&2
 
 # Foreground polling loop (D-02) — one short-lived GET in flight at a time,
-# keeping total concurrent sockets at 2 SSE + 1 poll (Pitfall 5).
+# keeping total concurrent sockets at 2 SSE + 1 poll (Pitfall 5). Also
+# checks and restarts either SSE holder if it has died (CR-02), logging the
+# restart so an operator reviewing the log can see it happened.
 while true; do
+  for idx in 0 1; do
+    if ! kill -0 "${SSE_PIDS[$idx]}" 2>/dev/null; then
+      logfile=$([ "$idx" = 0 ] && echo "$SSE_LOG_1" || echo "$SSE_LOG_2")
+      echo "$(date -u +%FT%TZ) SSE holder $idx died, restarting" >&2
+      start_sse_holder "$idx" "$logfile"
+    fi
+  done
   curl -s -o /dev/null -w "%{time_total}s spike poll -> HTTP %{http_code}\n" "http://${HOST}/spike" || true
   sleep "$INTERVAL"
 done
