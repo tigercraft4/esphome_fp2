@@ -60,20 +60,24 @@ else
         else if (key == "frag") frag = val;
         else if (key == "loop_time") loop_time = val;
       }
+      # WR-03: seed min/max per-field on first sight of THAT field, not on
+      # the shared line counter n==0. Keying off n==0 left a field stuck at
+      # "" (coerced to 0 by awk) for the whole run if the first matched
+      # line happened to be missing that field (e.g. a truncated capture).
       if (free != "") {
-        if (n == 0) { free_min = free; free_max = free; }
+        if (free_min == "") { free_min = free; free_max = free; }
         if (free + 0 < free_min + 0) free_min = free;
         if (free + 0 > free_max + 0) free_max = free;
         free_last = free;
       }
       if (min_free != "") {
-        if (n == 0) { minfree_min = min_free; minfree_max = min_free; }
+        if (minfree_min == "") { minfree_min = min_free; minfree_max = min_free; }
         if (min_free + 0 < minfree_min + 0) minfree_min = min_free;
         if (min_free + 0 > minfree_max + 0) minfree_max = min_free;
         minfree_last = min_free;
       }
       if (loop_time != "") {
-        if (n == 0) { loop_min = loop_time; loop_max = loop_time; }
+        if (loop_min == "") { loop_min = loop_time; loop_max = loop_time; }
         if (loop_time + 0 < loop_min + 0) loop_min = loop_time;
         if (loop_time + 0 > loop_max + 0) loop_max = loop_time;
         loop_last = loop_time;
