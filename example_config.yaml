@@ -15,11 +15,13 @@ esp32:
 
 # RUN-02/RUN-04 (09-03): a saved zone/Global-Zone override is a rare,
 # deliberate user action, not a high-frequency write - commit it to flash
-# promptly (flash_write_interval: 0s) so it survives a quick hard
-# power-cycle right after saving, not just a graceful reboot. The extra
-# flash wear is negligible given how infrequently saves happen.
+# as promptly as ESPHome allows (1ms - 0s is rejected, coerced with a
+# WARNING since a literal 0ms schedule would spin the main loop and trip
+# the watchdog) so it survives a quick hard power-cycle right after saving,
+# not just a graceful reboot. The extra flash wear is negligible given how
+# infrequently saves happen.
 preferences:
-  flash_write_interval: 0s
+  flash_write_interval: 1ms
 
 wifi:
   ssid: !secret wifi_ssid
