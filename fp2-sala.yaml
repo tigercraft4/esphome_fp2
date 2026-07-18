@@ -1,17 +1,5 @@
-# SPIKE-01 (D-08/D-09/D-10, phase 10-01): includes: pulls in the temporary
-# SpikeHandler route handler; on_boot: priority -100 registers it on base_ws
-# after web_server setup completes (Pitfall 3) so add_handler() doesn't race
-# web_server_base's own init(). Both entries are removed after the soak
-# regardless of go/no-go verdict.
 esphome:
   name: fp2-sala
-  includes:
-    - spike_handler.h
-  on_boot:
-    priority: -100
-    then:
-      - lambda: |-
-          id(base_ws)->add_handler(new SpikeHandler());
 
 esp32:
   board: esp32-solo1
@@ -42,17 +30,10 @@ wifi:
 
 captive_portal:
 
-# SPIKE-01/D-09 (phase 10-01): explicit web_server_base: id so the temporary
-# SpikeHandler /spike route (D-08) can be registered via add_handler() from
-# esphome: on_boot: above. Temporary, removed after the soak (D-10).
-web_server_base:
-  id: base_ws
-
 # Local diagnostics page on the device IP (http://<device-ip>/).
 # version 2 is embedded/offline-friendly and light on the SOLO-1.
 # Add an `auth:` block if you want to password-protect it.
 web_server:
-  web_server_base_id: base_ws
   port: 80
   version: 2
 
@@ -255,83 +236,6 @@ sensor:
     name: "Illuminance"
     address: 0x44
     update_interval: 30s
-
-  # SPIKE-01/D-04 (phase 10-01, temporary/D-10): stock debug: sensors give
-  # the direct empirical read on whether HTTP/SSE handling blocks the main
-  # loop long enough to threaten the >4.6ms UART RX overrun threshold.
-  - platform: debug
-    # WR-02: the debug: platform defaults to a 60s PollingComponent update
-    # interval, but heap_fragmentation (below) recomputes from heap_free/
-    # heap_block every 10s - without this override, 5 of every 6 samples
-    # were mathematically identical re-computations of stale data, implying
-    # finer time resolution than the D-11 RAM/fragmentation read actually
-    # had. Set to match heap_min_free's genuine 10s refresh cadence.
-    update_interval: 10s
-    free:
-      name: "Heap Free"
-      id: heap_free
-    block:
-      name: "Heap Max Block"
-      id: heap_block
-    loop_time:
-      name: "Loop Time"
-      id: heap_loop_time
-
-  # SPIKE-01/D-11 (phase 10-01, temporary/D-10): min_free/fragmentation
-  # don't exist as native debug: keys at the pinned esphome>=2025.12.4
-  # floor (Pitfall 1) - these two template sensors call the same raw
-  # ESP-IDF heap-caps API the future native sensors will wrap, giving
-  # exact parity without bumping the pin.
-  - platform: template
-    name: "Heap Min Free (derived)"
-    id: heap_min_free
-    update_interval: 10s
-    accuracy_decimals: 0
-    lambda: |-
-      // Source: esphome/esphome debug_esp32.cpp @ dev branch.
-      return (float) heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-
-  - platform: template
-    name: "Heap Fragmentation % (derived)"
-    id: heap_fragmentation
-    update_interval: 10s
-    accuracy_decimals: 1
-    lambda: |-
-      // Source: esphome/esphome debug_esp32.cpp @ dev branch - exact
-      // upstream formula.
-      float free_heap = id(heap_free).state;
-      float max_alloc = id(heap_block).state;
-      if (free_heap <= 0) return {};
-      return 100.0f - (100.0f * max_alloc / free_heap);
-
-  # SPIKE-01/D-05a/D-06 (phase 10-01, temporary/D-10): fast-changing entity
-  # that drives the reused built-in /events SSE endpoint - no bespoke
-  # AsyncEventSource (Pitfall 2). Published manually by the interval: below.
-  - platform: template
-    name: "Spike Counter"
-    id: spike_counter
-    update_interval: never
-    accuracy_decimals: 0
-
-# SPIKE-01/D-04/D-05a/D-06/D-11 (phase 10-01, temporary/D-10): drives the
-# 1s SSE-load counter bump (D-05a/D-06) and the 60s greppable spike_soak
-# log dump (D-04/D-11) for post-soak baseline/loaded comparison.
-interval:
-  - interval: 1s
-    then:
-      - sensor.template.publish:
-          id: spike_counter
-          # WR-01: a template sensor's initial state is NAN
-          # (Sensor::Sensor() : state(NAN)), and NaN + 1 == NaN under
-          # IEEE-754, so without this guard the counter is stuck at "NA" in
-          # HA forever instead of incrementing as a visible SSE heartbeat.
-          state: !lambda "return isnan(id(spike_counter).state) ? 0 : id(spike_counter).state + 1;"
-  - interval: 60s
-    then:
-      - lambda: |-
-          ESP_LOGI("spike_soak", "free=%.0f block=%.0f min_free=%.0f frag=%.1f loop_time=%.1f",
-                   id(heap_free).state, id(heap_block).state, id(heap_min_free).state,
-                   id(heap_fragmentation).state, id(heap_loop_time).state);
 
 binary_sensor:
   - platform: gpio
