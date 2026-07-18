@@ -1938,8 +1938,18 @@ void FP2Component::json_get_map_data(JsonObject root) {
     JsonArray zones_array = root["zones"].to<JsonArray>();
     for (FP2Zone *zone : zones_) {
       JsonObject zone_obj = zones_array.add<JsonObject>();
+      // WEBUI-01 (11-01): the device-hosted /zones list view needs a stable
+      // zone_id to submit on Save (D-02) - card.js never needed this because
+      // it only ever edited zones it had drawn itself.
+      zone_obj["id"] = zone->id;
       zone_obj["sensitivity"] = zone->sensitivity;
       zone_obj["grid"] = grid_to_hex_card_format(zone->grid);
+      if (zone->has_zone_type) {
+        // WEBUI-01 (11-01): pre-populate the list view's zone_type select
+        // (D-02). Conditional emit mirrors the presence_sensor style below -
+        // omitted entirely when the zone has no configured zone_type.
+        zone_obj["zone_type"] = zone->zone_type;
+      }
       if (zone->presence_sensor != nullptr) {
         zone_obj["presence_sensor"] = zone->presence_sensor->get_name().c_str();
       }
