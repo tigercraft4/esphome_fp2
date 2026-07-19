@@ -452,6 +452,11 @@ void FP2Component::save_zone_override_(uint8_t zone_id, const GridMap &grid, uin
   auto pref = global_preferences->make_preference<FP2ZoneOverride>(
       fnv1_hash("fp2_zone_override_" + std::to_string(zone_id)));
   pref.save(&ov);
+  // D-08 (12-01 retrofit): .save() alone only stages an in-RAM buffer -
+  // without this sync() a committed-looking override can be lost on a power
+  // cut before some unrelated core codepath happens to flush it
+  // (12-RESEARCH.md Finding 3). Closes a pre-existing Phase 9 durability gap.
+  global_preferences->sync();
 }
 
 bool FP2Component::load_global_zone_override_(FP2GlobalZoneOverride *out) {
@@ -465,6 +470,29 @@ void FP2Component::save_global_zone_override_(uint8_t presence_sensitivity) {
   auto pref = global_preferences->make_preference<FP2GlobalZoneOverride>(
       fnv1_hash("fp2_global_zone_override"));
   pref.save(&ov);
+  // D-08 (12-01 retrofit): see save_zone_override_() above - same durability
+  // gap, same fix.
+  global_preferences->sync();
+}
+
+// ZONEMGMT-03/04 (12-01): registry MEMBERSHIP load/save - exact mirror of
+// load_zone_override_()/save_zone_override_() above, but keyed on the fixed
+// literal "fp2_zone_registry_meta" (NOT per-zone-id), since membership is a
+// single 32-slot bitmask shared across all zone IDs.
+bool FP2Component::load_zone_registry_meta_(FP2ZoneRegistryMeta *out) {
+  auto pref = global_preferences->make_preference<FP2ZoneRegistryMeta>(
+      fnv1_hash("fp2_zone_registry_meta"));
+  return pref.load(out) && out->version == FP2_ZONE_REGISTRY_VERSION;
+}
+
+void FP2Component::save_zone_registry_meta_(uint32_t active_mask) {
+  FP2ZoneRegistryMeta meta{FP2_ZONE_REGISTRY_VERSION, active_mask};
+  auto pref = global_preferences->make_preference<FP2ZoneRegistryMeta>(
+      fnv1_hash("fp2_zone_registry_meta"));
+  pref.save(&meta);
+  // Finding 3 - do NOT omit this call. A registry mutation is not
+  // considered persisted until this sync() flushes it to flash.
+  global_preferences->sync();
 }
 
 // RUN-04 (09-01/09-03): live single-register Global Zone presence_sensitivity
