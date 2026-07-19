@@ -248,5 +248,60 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
     request->send(202, "application/json", R"({"status":"pending"})");
   }
 
+  // POST /api/zones/delete - ZONEMGMT-02: submit-then-poll deferred zone
+  // removal, sharing the same WR-02/WR-03/CR-01 precedents. Only zone_id is
+  // required. The scheduler name is deliberately distinct ("zone_remove")
+  // from both "zone_add" and "zone_editor_save" - a delete must never be
+  // able to silently cancel a concurrent create (or vice versa) by
+  // colliding on the same (component, name) scheduler slot (WR-03 root
+  // cause). remove_zone_at_runtime() is referenced ONLY inside the
+  // scheduler lambda below.
+  void handle_post_delete_(esphome::web_server_idf::AsyncWebServerRequest *request) {
+    if (request->getParam("zone_id") == nullptr) {
+      request->send(400, "application/json", R"({"error":"zone_id is required"})");
+      return;
+    }
+
+    // WR-03: shared in-flight guard across save/create/delete.
+    if (this->fp2_->save_pending()) {
+      request->send(409, "application/json", R"({"error":"a save is already in progress"})");
+      return;
+    }
+
+    const std::string zone_id_str = request->arg("zone_id");
+    char *end = nullptr;
+    long zone_id_l = strtol(zone_id_str.c_str(), &end, 10);
+    if (end == zone_id_str.c_str() || *end != '\0' || zone_id_l < 0 || zone_id_l > 31) {
+      request->send(400, "application/json", R"({"error":"zone_id must be an integer 0-31"})");
+      return;
+    }
+
+    int zone_id = (int) zone_id_l;
+
+    // CR-01: mark the mutation as pending synchronously, before scheduling.
+    this->fp2_->mark_editor_save_queued();
+
+    esphome::aqara_fp2::FP2Component *fp2 = this->fp2_;
+    esphome::App.scheduler.set_timeout(this->fp2_, "zone_remove", 1, [fp2, zone_id]() {
+      fp2->remove_zone_at_runtime((uint8_t) zone_id);
+    });
+
+    request->send(202, "application/json", R"({"status":"pending"})");
+  }
+
+  // GET /api/zones/free-slots - ZONEMGMT-04: dropdown data source for the
+  // Add-Zone UI (D-01/D-07). Mirrors handle_get_zones_ exactly - a
+  // read-only scan of the live zones_ union, safe on the httpd task because
+  // zones_ is only ever mutated on the main loop (deferred mutations
+  // above); this reflects a consistent snapshot taken between mutations.
+  void handle_get_free_slots_(esphome::web_server_idf::AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    JsonObject root = doc.to<JsonObject>();
+    this->fp2_->json_get_free_slots(root);
+    std::string out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out.c_str());
+  }
+
   esphome::aqara_fp2::FP2Component *fp2_;
 };
