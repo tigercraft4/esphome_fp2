@@ -1,5 +1,12 @@
 esphome:
   name: fp2-sala
+  # WEBUI-01/02/03 (11-04): copy the 11-02/11-03 project-owned headers into
+  # the build src root so fp2_component.cpp's #include "zones_web_handler.h"
+  # resolves (zones_web_handler.h in turn serves zones_page_bundle.h's
+  # PROGMEM bundle).
+  includes:
+    - zones_page_bundle.h
+    - zones_web_handler.h
 
 esp32:
   board: esp32-solo1
@@ -33,9 +40,18 @@ captive_portal:
 # Local diagnostics page on the device IP (http://<device-ip>/).
 # version 2 is embedded/offline-friendly and light on the SOLO-1.
 # Add an `auth:` block if you want to password-protect it.
+#
+# WEBUI-01/02/03 (11-04): id/web_server_base_id are explicit so aqara_fp2's
+# optional web_server_id/web_server_base_id keys below can reference this
+# same instance to register the device-hosted zone editor's routes.
 web_server:
+  id: main_ws
   port: 80
   version: 2
+  web_server_base_id: base_ws
+
+web_server_base:
+  id: base_ws
 
 api:
   encryption:
@@ -161,6 +177,10 @@ aqara_fp2_accel:
 aqara_fp2:
   id: fp2
   accel: fp2_accel
+  # WEBUI-01/02 (11-04): opt into the device-hosted zone editor by referencing
+  # the web_server/web_server_base declared above.
+  web_server_id: main_ws
+  web_server_base_id: base_ws
   uart_id: uart_bus
   radar_reset_pin: GPIO13
   mounting_position: left_corner
