@@ -582,6 +582,111 @@ void FP2Component::rehydrate_zone_registry_() {
   }
 }
 
+// ZONEMGMT-01 (12-02): add a new zone at runtime with zero YAML edits or
+// reflash. Define-before-activate ordering (12-RESEARCH.md Pattern 4):
+// ZONE_MAP/ZONE_SENSITIVITY/[DETECT_ZONE_TYPE]/ZONE_CLOSE_AWAY_ENABLE are
+// enqueued for the new ID BEFORE the rebuilt full ZONE_ACTIVATION_LIST - the
+// FIFO one-ACK-at-a-time command_queue_ guarantees this transmit order.
+void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int zone_type) {
+  // V5 (Pitfall 3): duplicate-ID guard scans the LIVE zones_ union - covers
+  // BOTH compile-time YAML zones and already-runtime-added zones, since they
+  // share one 0-31 ID space and one zones_ vector. Never derive this check
+  // from the NVS active_mask alone.
+  for (const auto &z : zones_) {
+    if (z->id == zone_id) {
+      ESP_LOGW(TAG, "add_zone_at_runtime: zone_id %u already in use", zone_id);
+      save_failed_ = true;
+      save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " already in use";
+      return;
+    }
+  }
+
+  ESP_LOGI(TAG, "Adding runtime zone %u (sensitivity=%u, zone_type=%d)", zone_id, sensitivity,
+           zone_type);
+  save_failed_ = false;
+  save_error_.clear();
+  pending_save_attr_ids_.clear();
+
+  // D-04: a newly-created zone defaults to a full 14x14 active grid - it must
+  // be immediately functional since grid painting doesn't exist until Phase 13.
+  GridMap grid = FULL_ACTIVE_GRID;
+
+  // Persist FIRST, durable before the radar sequence: the per-ID content
+  // override and the registry membership bit. Both sync()-flush (12-01/
+  // Finding 3) so a power cut right after this point can never diverge NVS
+  // from whatever gets enqueued to the radar below.
+  save_zone_override_(zone_id, grid, sensitivity, zone_type);
+  FP2ZoneRegistryMeta meta;
+  uint32_t active_mask = load_zone_registry_meta_(&meta) ? meta.active_mask : 0;
+  active_mask |= (1u << zone_id);
+  save_zone_registry_meta_(active_mask);
+
+  // Entity: reuse the cached FP2Zone/BinarySensor for this ID if this slot
+  // was ever constructed earlier this boot (Pitfall 4 - un-hide rather than
+  // leak a fresh allocation on re-add, since ESPHome has no
+  // App.unregister_binary_sensor()); otherwise construct fresh (Pattern 3).
+  FP2Zone *zone;
+  if (this->zone_slot_cache_[zone_id] != nullptr) {
+    zone = this->zone_slot_cache_[zone_id];
+    zone->grid = grid;
+    zone->sensitivity = sensitivity;
+    if (zone_type >= 0) {
+      zone->set_zone_type((uint8_t) zone_type);
+    }
+    if (zone->presence_sensor != nullptr) {
+      zone->presence_sensor->set_internal(false);
+    }
+  } else {
+    zone = new FP2Zone(zone_id, grid, sensitivity);
+    if (zone_type >= 0) {
+      zone->set_zone_type((uint8_t) zone_type);
+    }
+    // Finding 2: name/object_id strings must outlive the entity -
+    // set_name_and_object_id() stores raw, unowned const char* pointers.
+    // Heap-allocate and never free (matches ESPHome codegen's own lifetime
+    // assumption for a compile-time string literal baked into flash forever).
+    auto *name = new std::string("Zone " + std::to_string(zone_id) + " Presence");
+    auto *object_id = new std::string("zone_" + std::to_string(zone_id) + "_presence");
+    auto *sensor = new binary_sensor::BinarySensor();
+    sensor->set_name_and_object_id(name->c_str(), object_id->c_str());
+    sensor->set_device_class("occupancy");
+    App.register_binary_sensor(sensor);  // D-02: visible to HA after next ListEntitiesRequest
+    zone->set_presence_sensor(sensor);
+    this->zone_slot_cache_[zone_id] = zone;
+  }
+  zones_.push_back(zone);
+
+  // UART sequence - DEFINE first.
+  std::vector<uint8_t> payload;
+  payload.push_back(zone_id);
+  payload.insert(payload.end(), grid.begin(), grid.end());
+  enqueue_command_blob2_(AttrId::ZONE_MAP, payload);
+  pending_save_attr_ids_.push_back(AttrId::ZONE_MAP);
+
+  enqueue_command_(OpCode::WRITE, AttrId::ZONE_SENSITIVITY,
+                    (uint16_t)((zone_id << 8) | (sensitivity & 0xFF)));
+  pending_save_attr_ids_.push_back(AttrId::ZONE_SENSITIVITY);
+
+  if (zone_type >= 0) {
+    enqueue_command_(OpCode::WRITE, AttrId::DETECT_ZONE_TYPE,
+                      (uint16_t)((zone_id << 8) | ((uint8_t) zone_type & 0xFF)));
+    pending_save_attr_ids_.push_back(AttrId::DETECT_ZONE_TYPE);
+  }
+
+  enqueue_command_(OpCode::WRITE, AttrId::ZONE_CLOSE_AWAY_ENABLE, (uint16_t)((zone_id << 8) | 1));
+  pending_save_attr_ids_.push_back(AttrId::ZONE_CLOSE_AWAY_ENABLE);
+
+  // ACTIVATE last: rebuild the full 32-byte list from the now-updated
+  // zones_ - mirrors check_initialization_()'s activation-rebuild loop
+  // exactly (the single source of truth for "what is active now").
+  std::vector<uint8_t> activations(32, 0);
+  for (const auto &z : zones_) {
+    activations[z->id] = z->id;
+  }
+  enqueue_command_blob2_(AttrId::ZONE_ACTIVATION_LIST, activations);
+  pending_save_attr_ids_.push_back(AttrId::ZONE_ACTIVATION_LIST);
+}
+
 // RUN-04 (09-01/09-03): live single-register Global Zone presence_sensitivity
 // save. Write-and-forget (D-03) - ACK-of-write is the only success signal,
 // no read-back attempted. On the valid path this also persists the value to
