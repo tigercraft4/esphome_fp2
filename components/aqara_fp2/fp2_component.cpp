@@ -623,6 +623,12 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
 // allowlist, grid_hex length/charset) unchanged (V5 reuse - no new
 // validation added here).
 void FP2Component::save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type) {
+  // CR-01 fix (11-03): hand off pending-state ownership to
+  // pending_save_attr_ids_/save_failed_ (set below, inside
+  // save_zone_to_sensor()) now that this is actually running on the main
+  // loop. There is no gap: save_pending() ORs both fields, and this clear
+  // happens immediately before the call that populates the other field.
+  this->editor_save_queued_ = false;
   std::string grid_hex;
   for (const auto &zone : zones_) {
     if (zone->id == zone_id) {

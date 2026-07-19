@@ -543,9 +543,22 @@ public:
   // from the client beyond zone_id/sensitivity/zone_type, which
   // save_zone_to_sensor() already fully validates (V5).
   void save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type);
+  // CR-01 fix (11-03): synchronous "a save is in flight" bookkeeping, set by
+  // the /api/zones/save httpd handler *before* it schedules the deferred
+  // save_zone_from_editor() call. This is a plain bool flag flip, not a
+  // radar-mutating call, so setting it directly from the httpd task does not
+  // violate the WEBUI-02 deferred-mutation contract (only actual sensor
+  // writes must go through App.scheduler). It closes the race where an
+  // immediate GET /api/zones/status - fired right after the 202 response -
+  // could read stale pending_save_attr_ids_/save_failed_ state from before
+  // the scheduled lambda has run (or from boot, on the very first save).
+  // Cleared by save_zone_from_editor() itself, right before it hands off to
+  // save_zone_to_sensor(), which takes over pending-state ownership via
+  // pending_save_attr_ids_/save_failed_.
+  void mark_editor_save_queued() { editor_save_queued_ = true; }
   // Read by the wait_until: condition lambda and api.respond lambdas in the
   // fp2_save_global_zone_to_sensor HA action (fp2-sala.yaml/example_config.yaml).
-  bool save_pending() { return !pending_save_attr_ids_.empty(); }
+  bool save_pending() { return editor_save_queued_ || !pending_save_attr_ids_.empty(); }
   bool save_ok() { return !save_failed_; }
   std::string save_error() { return save_error_; }
 
@@ -754,6 +767,10 @@ protected:
   std::vector<AttrId> pending_save_attr_ids_;
   bool save_failed_{false};
   std::string save_error_;
+  // CR-01 fix (11-03): true from the moment the /api/zones/save httpd
+  // handler schedules the deferred save, until save_zone_from_editor()
+  // actually runs on the main loop and clears it. See mark_editor_save_queued().
+  bool editor_save_queued_{false};
 
   // Sleep-mode heartbeat keepalive (PROTO-02). Internal-only, no config toggle:
   // gated on sleep_mode_active_, set true by configure_sleep_mode(). Stock firmware

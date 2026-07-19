@@ -113,6 +113,14 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
       zone_type = atoi(request->arg("zone_type").c_str());
     }
 
+    // CR-01: mark the save as pending synchronously, before scheduling the
+    // deferred mutation, so a GET /api/zones/status that lands immediately
+    // after this 202 response can never observe a stale {pending:false}.
+    // This is in-memory bookkeeping only (no radar write, no FreeRTOS
+    // primitive) - the actual save_zone_from_editor() call remains inside
+    // the scheduler lambda below, unchanged.
+    this->fp2_->mark_editor_save_queued();
+
     esphome::aqara_fp2::FP2Component *fp2 = this->fp2_;
     esphome::App.scheduler.set_timeout(this->fp2_, "zone_editor_save", 1,
         [fp2, zone_id, sensitivity, zone_type]() {
