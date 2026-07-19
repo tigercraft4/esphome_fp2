@@ -514,6 +514,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
             '</select>' +
           '</div>' +
           '<button type="button" class="save-btn">Save to Sensor</button>' +
+          '<button type="button" class="remove-btn">Remove</button>' +
         '</div>' +
       '</div>' +
       '<div class="status-line"></div>';
@@ -521,6 +522,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     var saveBtn = row.querySelector('.save-btn');
     saveBtn.addEventListener('click', function () {
       handleSaveClick(zone.id, row, saveBtn);
+    });
+
+    var removeBtn = row.querySelector('.remove-btn');
+    removeBtn.addEventListener('click', function () {
+      handleRemoveClick(zone.id, row, removeBtn);
     });
 
     return row;
@@ -654,6 +660,33 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   }
 
   addZoneBtnEl.addEventListener('click', handleAddClick);
+
+  // --- Remove-Zone (ZONEMGMT-02, D-06): confirm-gated destructive delete ---
+
+  function handleRemoveClick(zoneId, row, removeBtn) {
+    if (savePending) return;
+    if (!window.confirm('Remove Zone ' + zoneId + '? This deletes its saved configuration.')) {
+      return;
+    }
+
+    savePending = true;
+    updateSaveButtonsDisabled();
+    removeBtn.textContent = 'Removing…';
+
+    var body = 'zone_id=' + encodeURIComponent(zoneId);
+
+    fetch('/api/zones/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body
+    })
+      .then(function () {
+        pollAddRemoveStatus();
+      })
+      .catch(function () {
+        finishAddRemove(false);
+      });
+  }
 
   // --- Save flow: submit-then-poll (WEBUI-02/05, RESEARCH Pattern 3) ---
 
