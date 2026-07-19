@@ -669,6 +669,22 @@ void FP2Component::loop() {
     }
   }
 
+  // D-04 (11-01): poll the project-owned /zones/events SSE source and toggle
+  // location reporting on the connect/disconnect edge (not every tick).
+  // loop() must run first - it reaps dead sessions, which is required before
+  // empty()/count() reflect reality (Pitfall 4).
+  if (this->zone_editor_sse_ != nullptr) {
+    this->zone_editor_sse_->loop();
+    bool has_clients = !this->zone_editor_sse_->empty();
+    if (has_clients && !this->sse_reporting_active_) {
+      this->set_location_reporting_enabled(true); // D-04 connect
+      this->sse_reporting_active_ = true;
+    } else if (!has_clients && this->sse_reporting_active_) {
+      this->set_location_reporting_enabled(false); // D-04 disconnect
+      this->sse_reporting_active_ = false;
+    }
+  }
+
   check_initialization_();
   process_command_queue_();
 
@@ -1458,6 +1474,14 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
 
   if (this->target_tracking_sensor_ != nullptr) {
     this->target_tracking_sensor_->publish_state(base64_str);
+  }
+
+  // WEBUI-03 (11-01): push the SAME base64 payload to the /zones live overlay
+  // over the dedicated SSE source, if a client is connected. No re-encoding -
+  // byte-for-byte parity with the target_tracking text sensor above so
+  // card.js's decodeTargetsBase64() works unchanged on the client side.
+  if (this->zone_editor_sse_ != nullptr) {
+    this->zone_editor_sse_->try_send_nodefer(base64_str.c_str(), "target_update");
   }
 
   // Derived numeric sensors (throttled to ~1 Hz; the raw stream is 10-20 Hz).

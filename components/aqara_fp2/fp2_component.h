@@ -7,6 +7,9 @@
 #include "esphome/components/socket/socket.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
+// WEBUI-03 (11-01): dedicated SSE overlay member (zone_editor_sse_) for the
+// device-hosted zone editor's live target-tracking view (D-04).
+#include "esphome/components/web_server_idf/web_server_idf.h"
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 
@@ -467,6 +470,15 @@ public:
       fp2_accel_ = accel;
   }
 
+  // WEBUI-03 (11-01): register the project-owned /zones/events SSE source
+  // (constructed and add_handler()'d from fp2-sala.yaml's on_boot lambda,
+  // Plan 04). Nullptr-safe by construction - loop() and the push site both
+  // guard on zone_editor_sse_ != nullptr, so the component works unchanged
+  // if this is never called.
+  void set_zone_editor_sse(esphome::web_server_idf::AsyncEventSource *sse) {
+      this->zone_editor_sse_.reset(sse);
+  }
+
   void set_location_reporting_enabled(bool enabled);
   void force_detection_config();
   void read_detection_config();
@@ -657,6 +669,17 @@ protected:
   uint16_t telnet_port_{23};
   std::unique_ptr<socket::Socket> telnet_listen_socket_;
   std::unique_ptr<socket::Socket> telnet_client_;
+
+  // WEBUI-03/D-04 (11-01): project-owned SSE overlay for the device-hosted
+  // /zones live view. Mirrors the telnet_client_ nullable-optional-resource
+  // shape above - no socket/source exists unless set_zone_editor_sse() is
+  // called (Plan 04's on_boot lambda). sse_reporting_active_ is the D-04
+  // edge-detection flag: true only while location reporting was turned on
+  // because of this source's client count, so loop() toggles
+  // set_location_reporting_enabled() exactly once per connect/disconnect
+  // transition instead of every tick.
+  std::unique_ptr<esphome::web_server_idf::AsyncEventSource> zone_editor_sse_;
+  bool sse_reporting_active_{false};
 
   // Map Configuration (compile-time generated)
   std::string map_config_json_;
