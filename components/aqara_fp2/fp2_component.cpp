@@ -1,4 +1,8 @@
 #include "fp2_component.h"
+// WEBUI-01/02/03 (11-04): must come after fp2_component.h - zones_web_handler.h
+// includes it back and needs FP2Component fully declared first. Resolved via
+// fp2-sala.yaml's esphome: includes: (Task 3).
+#include "zones_web_handler.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
@@ -194,6 +198,21 @@ void FP2Component::setup() {
       telnet_listen_socket_->listen(1);  // backlog=1: single client only (D-05)
       ESP_LOGW(TAG, "telnet raw UART bridge listening on port %u - LAN-ONLY, NO AUTHENTICATION. "
                     "Never expose this port to the internet.", telnet_port_);
+    }
+  }
+
+  // WEBUI-01/02/03 (11-04): register the 11-02/11-03 page+api handlers and
+  // the 11-01 SSE overlay onto the existing web_server. Nothing is
+  // registered unless web_server_id/web_server_base_id were set in YAML
+  // (web_server_base_ stays nullptr otherwise).
+  if (this->web_server_base_ != nullptr) {
+    this->web_server_base_->add_handler(new ::ZonesPageHandler());
+    this->web_server_base_->add_handler(new ::ZonesApiHandler(this));
+
+    if (this->web_server_ != nullptr) {
+      auto *sse = new esphome::web_server_idf::AsyncEventSource("/zones/events", this->web_server_);
+      this->web_server_base_->add_handler(sse);
+      this->set_zone_editor_sse(sse);
     }
   }
 }
