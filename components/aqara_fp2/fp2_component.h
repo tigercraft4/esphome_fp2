@@ -10,6 +10,10 @@
 // WEBUI-03 (11-01): dedicated SSE overlay member (zone_editor_sse_) for the
 // device-hosted zone editor's live target-tracking view (D-04).
 #include "esphome/components/web_server_idf/web_server_idf.h"
+// WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null unless
+// web_server_id/web_server_base_id set in YAML.
+#include "esphome/components/web_server_base/web_server_base.h"
+#include "esphome/components/web_server/web_server.h"
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 
@@ -479,6 +483,15 @@ public:
       this->zone_editor_sse_.reset(sse);
   }
 
+  // WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null
+  // unless web_server_id/web_server_base_id set in YAML.
+  void set_web_server_base(esphome::web_server_base::WebServerBase *base) {
+      this->web_server_base_ = base;
+  }
+  void set_web_server(esphome::web_server::WebServer *ws) {
+      this->web_server_ = ws;
+  }
+
   void set_location_reporting_enabled(bool enabled);
   void force_detection_config();
   void read_detection_config();
@@ -687,6 +700,11 @@ protected:
   // transition instead of every tick.
   std::unique_ptr<esphome::web_server_idf::AsyncEventSource> zone_editor_sse_;
   bool sse_reporting_active_{false};
+
+  // WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null
+  // unless web_server_id/web_server_base_id set in YAML.
+  esphome::web_server_base::WebServerBase *web_server_base_{nullptr};
+  esphome::web_server::WebServer *web_server_{nullptr};
 
   // Map Configuration (compile-time generated)
   std::string map_config_json_;
