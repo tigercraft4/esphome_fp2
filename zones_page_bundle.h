@@ -628,11 +628,20 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body
     })
-      .then(function () {
+      .then(function (resp) {
+        // WR-02: don't blindly poll the shared /api/zones/status endpoint on
+        // a rejected POST (e.g. 409 from another in-flight save/create/delete,
+        // or 400 on bad input) - that would misreport an unrelated in-flight
+        // operation's outcome as this request's own result.
+        if (!resp.ok) {
+          return resp.json().catch(function () { return {}; }).then(function (data) {
+            finishAddRemove(false, data.error || ('request rejected (' + resp.status + ')'));
+          });
+        }
         pollAddRemoveStatus();
       })
       .catch(function () {
-        finishAddRemove(false);
+        finishAddRemove(false, 'network error');
       });
   }
 
@@ -644,17 +653,26 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
           window.setTimeout(pollAddRemoveStatus, 1000);
           return;
         }
-        finishAddRemove(data.ok === true);
+        finishAddRemove(data.ok === true, data.error);
       })
       .catch(function () {
-        finishAddRemove(false);
+        finishAddRemove(false, 'network error');
       });
   }
 
-  function finishAddRemove(ok) {
+  // CR-02: surface Add/Remove failures instead of silently discarding `ok` -
+  // matches finishSave()'s honest {pending, ok, error} confirmation contract
+  // (WEBUI-05). Without this, a radar ACK-timeout on add/remove was
+  // completely invisible: NVS + in-memory state + UI all say the change
+  // succeeded (persist-first by design) even though the physical radar was
+  // never actually told about it.
+  function finishAddRemove(ok, errorText) {
     savePending = false;
     addZoneBtnEl.textContent = 'Add';
     updateSaveButtonsDisabled();
+    if (!ok) {
+      window.alert('Zone change failed: ' + (errorText || "device didn't confirm the write in time"));
+    }
     loadZones();
     loadFreeSlots();
   }
@@ -680,11 +698,17 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body
     })
-      .then(function () {
+      .then(function (resp) {
+        // WR-02: see handleAddClick()'s identical guard.
+        if (!resp.ok) {
+          return resp.json().catch(function () { return {}; }).then(function (data) {
+            finishAddRemove(false, data.error || ('request rejected (' + resp.status + ')'));
+          });
+        }
         pollAddRemoveStatus();
       })
       .catch(function () {
-        finishAddRemove(false);
+        finishAddRemove(false, 'network error');
       });
   }
 
