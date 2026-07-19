@@ -687,6 +687,71 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
   pending_save_attr_ids_.push_back(AttrId::ZONE_ACTIVATION_LIST);
 }
 
+// ZONEMGMT-02 (12-02): remove an existing zone at runtime with zero YAML
+// edits or reflash. Deactivate-before-clear ordering (12-RESEARCH.md
+// Pattern 5): the rebuilt ZONE_ACTIVATION_LIST (with this ID zeroed) is
+// enqueued BEFORE the ZONE_MAP hygiene clear, so the radar stops treating
+// the ID as real before any grid data is touched.
+void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
+  auto it = std::find_if(zones_.begin(), zones_.end(),
+                          [zone_id](FP2Zone *z) { return z->id == zone_id; });
+  if (it == zones_.end()) {
+    ESP_LOGW(TAG, "remove_zone_at_runtime: zone_id %u not found", zone_id);
+    save_failed_ = true;
+    save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " not found";
+    return;
+  }
+
+  ESP_LOGI(TAG, "Removing runtime zone %u", zone_id);
+  save_failed_ = false;
+  save_error_.clear();
+  pending_save_attr_ids_.clear();
+
+  FP2Zone *zone = *it;
+  // Erase from the in-memory set FIRST so the activation-list rebuild below
+  // reads the post-removal membership (Pattern 5).
+  zones_.erase(it);
+
+  // UART sequence - DEACTIVATE first.
+  std::vector<uint8_t> activations(32, 0);
+  for (const auto &z : zones_) {
+    activations[z->id] = z->id;
+  }
+  enqueue_command_blob2_(AttrId::ZONE_ACTIVATION_LIST, activations);
+  pending_save_attr_ids_.push_back(AttrId::ZONE_ACTIVATION_LIST);
+
+  // CLEAR second (hygiene) - not load-bearing for correctness (the "define"
+  // step of a future add always rewrites this ID's ZONE_MAP fresh), but
+  // avoids leaving a real grid sitting at a deactivated ID.
+  std::vector<uint8_t> empty_zone(41, 0x00);
+  empty_zone[0] = zone_id;
+  enqueue_command_blob2_(AttrId::ZONE_MAP, empty_zone);
+  pending_save_attr_ids_.push_back(AttrId::ZONE_MAP);
+
+  // HA entity: mark unavailable + hidden from the next ListEntitiesRequest
+  // (D-03). Do NOT delete the FP2Zone/BinarySensor objects - ESPHome has no
+  // App.unregister_binary_sensor() and a freed-but-referenced pointer is a
+  // use-after-free the API iterator will eventually dereference (Pitfall 4).
+  // Keep them alive in zone_slot_cache_ for reuse on a future re-add.
+  if (zone->presence_sensor != nullptr) {
+    zone->presence_sensor->invalidate_state();
+    zone->presence_sensor->set_internal(true);
+  }
+  if (zone->motion_sensor != nullptr) {
+    zone->motion_sensor->invalidate_state();
+    zone->motion_sensor->set_internal(true);
+  }
+
+  // NVS: clear this ID's membership bit and persist (syncs). Leave the
+  // per-ID FP2ZoneOverride content in place - harmless dead data only ever
+  // read for IDs currently in zones_, and a future add always rewrites it
+  // fresh; no explicit wipe is load-bearing for correctness.
+  FP2ZoneRegistryMeta meta;
+  uint32_t active_mask = load_zone_registry_meta_(&meta) ? meta.active_mask : 0;
+  active_mask &= ~(1u << zone_id);
+  save_zone_registry_meta_(active_mask);
+}
+
 // RUN-04 (09-01/09-03): live single-register Global Zone presence_sensitivity
 // save. Write-and-forget (D-03) - ACK-of-write is the only success signal,
 // no read-back attempted. On the valid path this also persists the value to
