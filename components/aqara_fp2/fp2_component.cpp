@@ -1710,6 +1710,14 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             }
             break;
         }
+        // WR-04 fix (12-REVIEW): explicit break on the malformed-payload path
+        // so execution never falls through into ZONE_PEOPLE_NUMBER's case
+        // body below (attr_id is still ZONE_PRESENCE here, so the fallthrough
+        // would re-evaluate the same failing guard and mislabel a malformed
+        // ZONE_PRESENCE report as "zone_people_number_malformed" in the
+        // debug sensor/log).
+        publish_radar_debug_("zone_presence_malformed", attr_id, payload);
+        break;
 
     case AttrId::ZONE_PEOPLE_NUMBER:  // Zone People Count (SENSE-01, 08-01)
         // Payload: [SubID 2B] [Type 0x01(UINT16)] [ValH] [ValL]
