@@ -106,11 +106,41 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
       return;
     }
 
-    int zone_id = atoi(request->arg("zone_id").c_str());
-    int sensitivity = atoi(request->arg("sensitivity").c_str());
+    // WR-02: atoi() returns 0 for non-numeric input and the (uint8_t) cast
+    // in the scheduler lambda below silently truncates out-of-range values
+    // modulo 256 (e.g. sensitivity=259 -> atoi -> 259 -> (uint8_t)259 -> 3,
+    // a "valid"-looking sensitivity saved with no error surfaced anywhere).
+    // Validate with strtol()+endptr+range before narrowing so garbage input
+    // is rejected with 400 instead of silently coerced into a plausible
+    // value.
+    const std::string zone_id_str = request->arg("zone_id");
+    char *end = nullptr;
+    long zone_id_l = strtol(zone_id_str.c_str(), &end, 10);
+    if (end == zone_id_str.c_str() || *end != '\0' || zone_id_l < 0 || zone_id_l > 255) {
+      request->send(400, "application/json", R"({"error":"zone_id must be an integer 0-255"})");
+      return;
+    }
+
+    const std::string sensitivity_str = request->arg("sensitivity");
+    end = nullptr;
+    long sensitivity_l = strtol(sensitivity_str.c_str(), &end, 10);
+    if (end == sensitivity_str.c_str() || *end != '\0' || sensitivity_l < 1 || sensitivity_l > 3) {
+      request->send(400, "application/json", R"({"error":"sensitivity must be 1-3"})");
+      return;
+    }
+
+    int zone_id = (int) zone_id_l;
+    int sensitivity = (int) sensitivity_l;
     int zone_type = -1;
     if (request->getParam("zone_type") != nullptr) {
-      zone_type = atoi(request->arg("zone_type").c_str());
+      const std::string zone_type_str = request->arg("zone_type");
+      end = nullptr;
+      long zone_type_l = strtol(zone_type_str.c_str(), &end, 10);
+      if (end == zone_type_str.c_str() || *end != '\0') {
+        request->send(400, "application/json", R"({"error":"zone_type must be an integer"})");
+        return;
+      }
+      zone_type = (int) zone_type_l;
     }
 
     // CR-01: mark the save as pending synchronously, before scheduling the
