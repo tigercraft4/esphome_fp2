@@ -588,6 +588,15 @@ void FP2Component::rehydrate_zone_registry_() {
 // enqueued for the new ID BEFORE the rebuilt full ZONE_ACTIVATION_LIST - the
 // FIFO one-ACK-at-a-time command_queue_ guarantees this transmit order.
 void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int zone_type) {
+  // CR-01 fix (12-REVIEW): hand off pending-state ownership to
+  // pending_save_attr_ids_/save_failed_ now that this deferred call is
+  // actually running on the main loop - mirrors save_zone_from_editor()'s
+  // own precedent. Must run FIRST, before the duplicate-ID rejection below,
+  // so even a rejected (duplicate-ID) create call clears the flag the
+  // handle_post_create_ httpd handler set synchronously; otherwise
+  // save_pending() would wedge permanently true after the very first
+  // create/delete call of any outcome.
+  this->editor_save_queued_ = false;
   // V5 (Pitfall 3): duplicate-ID guard scans the LIVE zones_ union - covers
   // BOTH compile-time YAML zones and already-runtime-added zones, since they
   // share one 0-31 ID space and one zones_ vector. Never derive this check
@@ -693,6 +702,10 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
 // enqueued BEFORE the ZONE_MAP hygiene clear, so the radar stops treating
 // the ID as real before any grid data is touched.
 void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
+  // CR-01 fix (12-REVIEW): see add_zone_at_runtime()'s identical comment -
+  // must run first, before the not-found rejection below, so a rejected
+  // delete call also clears the flag handle_post_delete_ set synchronously.
+  this->editor_save_queued_ = false;
   auto it = std::find_if(zones_.begin(), zones_.end(),
                           [zone_id](FP2Zone *z) { return z->id == zone_id; });
   if (it == zones_.end()) {
