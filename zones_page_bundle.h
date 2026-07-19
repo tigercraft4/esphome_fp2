@@ -191,6 +191,49 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     min-height: 44px;
     cursor: pointer;
   }
+  .remove-btn {
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    color: #DC2626;
+    background: #FFFFFF;
+    border: 1px solid #DC2626;
+    border-radius: 4px;
+    padding: 0 16px;
+    min-width: 44px;
+    min-height: 44px;
+    cursor: pointer;
+  }
+  .remove-btn:disabled {
+    background: #D8DCE1;
+    color: #5B6470;
+    border-color: #D8DCE1;
+    cursor: not-allowed;
+  }
+  .add-zone-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #D8DCE1;
+  }
+  .add-zone-bar .save-btn {
+    background: #16A34A;
+  }
+  .add-zone-bar .save-btn:disabled {
+    background: #D8DCE1;
+    color: #5B6470;
+  }
+  .capacity-message {
+    font-size: 14px;
+    font-weight: 400;
+    color: #5B6470;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #D8DCE1;
+  }
   @media (max-width: 480px) {
     body { padding: 8px; }
     .header-bar, .panel { padding: 16px; }
@@ -213,6 +256,14 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
   <section class="panel" id="zones-panel">
     <h2 class="panel-title">Zones</h2>
+    <div id="add-zone-bar" class="add-zone-bar">
+      <div class="field-group">
+        <label class="field-label" for="add-zone-select">Add Zone</label>
+        <select id="add-zone-select"></select>
+      </div>
+      <button type="button" id="add-zone-btn" class="save-btn">Add</button>
+    </div>
+    <div id="capacity-message" class="capacity-message" style="display:none;">All 32 zone slots in use &mdash; remove one to add another</div>
     <div id="zone-list">
       <div class="loading-state">Loading zones&hellip;</div>
     </div>
@@ -237,6 +288,10 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   var badgeEl = document.getElementById('live-badge');
   var zoneListEl = document.getElementById('zone-list');
   var liveGridEl = document.getElementById('live-grid');
+  var addZoneBarEl = document.getElementById('add-zone-bar');
+  var addZoneSelectEl = document.getElementById('add-zone-select');
+  var addZoneBtnEl = document.getElementById('add-zone-btn');
+  var capacityMessageEl = document.getElementById('capacity-message');
 
   // Pitfall 1 / RESEARCH A1: the firmware's save-confirmation state
   // (save_pending()/save_ok()/save_error()) is one shared, global set of
@@ -422,11 +477,16 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     return html;
   }
 
+  // D-07: capacity-full state, set by loadFreeSlots(); combined with
+  // savePending in updateSaveButtonsDisabled() so Add is gated by both.
+  var freeSlotsFull = false;
+
   function updateSaveButtonsDisabled() {
-    var buttons = zoneListEl.querySelectorAll('.save-btn');
+    var buttons = zoneListEl.querySelectorAll('.save-btn, .remove-btn');
     for (var i = 0; i < buttons.length; i++) {
       buttons[i].disabled = savePending;
     }
+    addZoneBtnEl.disabled = savePending || freeSlotsFull;
   }
 
   function renderZoneRow(zone) {
@@ -454,6 +514,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
             '</select>' +
           '</div>' +
           '<button type="button" class="save-btn">Save to Sensor</button>' +
+          '<button type="button" class="remove-btn">Remove</button>' +
         '</div>' +
       '</div>' +
       '<div class="status-line"></div>';
@@ -461,6 +522,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     var saveBtn = row.querySelector('.save-btn');
     saveBtn.addEventListener('click', function () {
       handleSaveClick(zone.id, row, saveBtn);
+    });
+
+    var removeBtn = row.querySelector('.remove-btn');
+    removeBtn.addEventListener('click', function () {
+      handleRemoveClick(zone.id, row, removeBtn);
     });
 
     return row;
@@ -473,7 +539,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       empty.className = 'empty-state';
       empty.innerHTML =
         '<h3>No zones configured</h3>' +
-        '<p>This build has no compiled zones. Add a <code>zones:</code> block to your device YAML and reflash — creating zones from this page is coming in a future update.</p>';
+        '<p>This build has no compiled zones. Use the Add Zone control above to create one, or add a <code>zones:</code> block to your device YAML and reflash.</p>';
       zoneListEl.appendChild(empty);
       return;
     }
@@ -510,6 +576,115 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       })
       .catch(function () {
         showLoadError();
+      });
+  }
+
+  // --- Add-Zone (ZONEMGMT-01, D-01/D-07): server-computed free-slot dropdown ---
+
+  function loadFreeSlots() {
+    fetch('/api/zones/free-slots')
+      .then(function (resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(function (data) {
+        var freeSlots = data.free_slots || [];
+        freeSlotsFull = data.full === true || freeSlots.length === 0;
+
+        addZoneSelectEl.innerHTML = '';
+        for (var i = 0; i < freeSlots.length; i++) {
+          var opt = document.createElement('option');
+          opt.value = freeSlots[i];
+          opt.textContent = String(freeSlots[i]);
+          addZoneSelectEl.appendChild(opt);
+        }
+        // Discretion (D-01 follow-up): pre-select the lowest free id, which
+        // is already first since json_get_free_slots() emits ids 0..31 in order.
+        if (freeSlots.length > 0) addZoneSelectEl.value = String(freeSlots[0]);
+
+        addZoneBarEl.style.display = freeSlotsFull ? 'none' : '';
+        capacityMessageEl.style.display = freeSlotsFull ? '' : 'none';
+        updateSaveButtonsDisabled();
+      })
+      .catch(function () {
+        // Leave the last-known Add-Zone state as-is; loadZones()'s own
+        // error path already surfaces a reload affordance for the page.
+      });
+  }
+
+  function handleAddClick() {
+    if (savePending || freeSlotsFull) return;
+    var zoneId = addZoneSelectEl.value;
+    if (zoneId === '') return;
+
+    savePending = true;
+    updateSaveButtonsDisabled();
+    addZoneBtnEl.textContent = 'Adding…';
+
+    var body = 'zone_id=' + encodeURIComponent(zoneId) + '&sensitivity=2';
+
+    fetch('/api/zones/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body
+    })
+      .then(function () {
+        pollAddRemoveStatus();
+      })
+      .catch(function () {
+        finishAddRemove(false);
+      });
+  }
+
+  function pollAddRemoveStatus() {
+    fetch('/api/zones/status')
+      .then(function (resp) { return resp.json(); })
+      .then(function (data) {
+        if (data.pending) {
+          window.setTimeout(pollAddRemoveStatus, 1000);
+          return;
+        }
+        finishAddRemove(data.ok === true);
+      })
+      .catch(function () {
+        finishAddRemove(false);
+      });
+  }
+
+  function finishAddRemove(ok) {
+    savePending = false;
+    addZoneBtnEl.textContent = 'Add';
+    updateSaveButtonsDisabled();
+    loadZones();
+    loadFreeSlots();
+  }
+
+  addZoneBtnEl.addEventListener('click', handleAddClick);
+
+  // --- Remove-Zone (ZONEMGMT-02, D-06): confirm-gated destructive delete ---
+
+  function handleRemoveClick(zoneId, row, removeBtn) {
+    if (savePending) return;
+    if (!window.confirm('Remove Zone ' + zoneId + '? This deletes its saved configuration.')) {
+      return;
+    }
+
+    savePending = true;
+    updateSaveButtonsDisabled();
+    removeBtn.textContent = 'Removing…';
+
+    var body = 'zone_id=' + encodeURIComponent(zoneId);
+
+    fetch('/api/zones/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body
+    })
+      .then(function () {
+        pollAddRemoveStatus();
+      })
+      .catch(function () {
+        finishAddRemove(false);
       });
   }
 
@@ -577,6 +752,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   }
 
   loadZones();
+  loadFreeSlots();
 })();
 </script>
 </body>
