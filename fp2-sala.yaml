@@ -15,11 +15,13 @@ esp32:
 
 # RUN-02/RUN-04 (09-03): a saved zone/Global-Zone override is a rare,
 # deliberate user action, not a high-frequency write - commit it to flash
-# promptly (flash_write_interval: 0s) so it survives a quick hard
-# power-cycle right after saving, not just a graceful reboot. The extra
-# flash wear is negligible given how infrequently saves happen.
+# as promptly as ESPHome allows (1ms - 0s is rejected, coerced with a
+# WARNING since a literal 0ms schedule would spin the main loop and trip
+# the watchdog) so it survives a quick hard power-cycle right after saving,
+# not just a graceful reboot. The extra flash wear is negligible given how
+# infrequently saves happen.
 preferences:
-  flash_write_interval: 0s
+  flash_write_interval: 1ms
 
 wifi:
   ssid: !secret wifi_ssid
@@ -153,6 +155,7 @@ external_components:
       type: git
       url: https://github.com/tigercraft4/esphome_fp2
       ref: main
+    refresh: 0s
     components: [aqara_fp2, aqara_fp2_accel]
 
 aqara_fp2_accel:
@@ -179,6 +182,9 @@ aqara_fp2:
   location_report_switch:
     name: "Report Targets"
 
+  operating_mode:
+    name: "Operating Mode"
+
   interference_grid: |-
     . . . . . . . . . . . . . .
     . . . . . . . . . . . . . .
@@ -201,6 +207,30 @@ aqara_fp2:
       name: "Global Presence"
     motion:
       name: "Global Motion"
+
+  fall_detected:
+    name: "Fall Detected"
+
+  zones:
+    - id: test_zone
+      grid: |-
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+      presence_sensitivity: medium
+      presence:
+        name: "Test Zone Presence"
 
   radar_software_version:
     name: "Radar Software Version"
