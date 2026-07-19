@@ -732,10 +732,20 @@ void FP2Component::loop() {
     this->zone_editor_sse_->loop();
     bool has_clients = !this->zone_editor_sse_->empty();
     if (has_clients && !this->sse_reporting_active_) {
-      this->set_location_reporting_enabled(true); // D-04 connect
+      // WR-01 fix: only claim ownership of turning reporting off later if
+      // this session is the one turning it on now. If it was already on
+      // (e.g. a user enabled "Report Targets" in HA), leave that owner's
+      // intent alone on disconnect.
+      this->sse_forced_reporting_on_ = !this->location_reporting_active_;
+      if (this->sse_forced_reporting_on_) {
+        this->set_location_reporting_enabled(true); // D-04 connect
+      }
       this->sse_reporting_active_ = true;
     } else if (!has_clients && this->sse_reporting_active_) {
-      this->set_location_reporting_enabled(false); // D-04 disconnect
+      if (this->sse_forced_reporting_on_) {
+        this->set_location_reporting_enabled(false); // D-04 disconnect
+        this->sse_forced_reporting_on_ = false;
+      }
       this->sse_reporting_active_ = false;
     }
   }

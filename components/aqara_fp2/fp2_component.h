@@ -713,6 +713,13 @@ protected:
   // transition instead of every tick.
   std::unique_ptr<esphome::web_server_idf::AsyncEventSource> zone_editor_sse_;
   bool sse_reporting_active_{false};
+  // WR-01 fix (11-03): whether *this SSE session* is the one that turned
+  // location reporting on (i.e. it was off, HA-side, at connect time).
+  // Only true in that case does the disconnect edge turn it back off -
+  // otherwise a user-enabled "Report Targets" switch (or another consumer
+  // depending on target_tracking_sensor_) would get silently clobbered by
+  // an unrelated /zones page open+close.
+  bool sse_forced_reporting_on_{false};
 
   // WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null
   // unless web_server_id/web_server_base_id set in YAML.
