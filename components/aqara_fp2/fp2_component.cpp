@@ -595,6 +595,36 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
   save_zone_override_(zone_id, grid, sensitivity, zone_type);
 }
 
+// WEBUI-02 (11-03): server-side grid lookup for the device-hosted /zones
+// editor's POST /api/zones/save handler. The editor never sends a grid over
+// the wire (D-01) - only zone_id/sensitivity/zone_type are parsed from the
+// request, and this method resolves the already-compiled zone's 40-byte
+// grid by zone_id before delegating to save_zone_to_sensor(), which performs
+// every validation (zone_id membership, sensitivity range, zone_type
+// allowlist, grid_hex length/charset) unchanged (V5 reuse - no new
+// validation added here).
+void FP2Component::save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type) {
+  std::string grid_hex;
+  for (const auto &zone : zones_) {
+    if (zone->id == zone_id) {
+      // Build all 40 bytes as an 80-char lowercase hex string. Deliberately
+      // NOT grid_to_hex_card_format() - that helper emits only 56 chars (14
+      // rows) for the /zones list view's display, which would fail
+      // save_zone_to_sensor()'s exactly-80-character length check.
+      char byte_hex[3];
+      for (size_t i = 0; i < zone->grid.size(); i++) {
+        snprintf(byte_hex, sizeof(byte_hex), "%02x", zone->grid[i]);
+        grid_hex += byte_hex;
+      }
+      break;
+    }
+  }
+  // If zone_id isn't found, grid_hex stays empty - save_zone_to_sensor()
+  // rejects unknown zone_id first (its own (a) check), so an empty grid_hex
+  // never reaches the (d) length check.
+  this->save_zone_to_sensor(zone_id, grid_hex, sensitivity, zone_type);
+}
+
 void FP2LocationSwitch::write_state(bool state) {
   if (this->parent_ != nullptr) {
     this->parent_->set_location_reporting_enabled(state);

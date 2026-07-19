@@ -523,6 +523,13 @@ public:
   // without a reflash.
   void save_zone_to_sensor(uint8_t zone_id, const std::string &grid_hex, uint8_t sensitivity,
                             int zone_type);
+  // WEBUI-02 (11-03): device-hosted /zones editor entry point. Looks up the
+  // already-compiled zone's 40-byte grid server-side by zone_id and forwards
+  // it to save_zone_to_sensor() - the editor's HTTP handler never sends a
+  // grid over the wire (D-01), so there is nothing to trust or re-validate
+  // from the client beyond zone_id/sensitivity/zone_type, which
+  // save_zone_to_sensor() already fully validates (V5).
+  void save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type);
   // Read by the wait_until: condition lambda and api.respond lambdas in the
   // fp2_save_global_zone_to_sensor HA action (fp2-sala.yaml/example_config.yaml).
   bool save_pending() { return !pending_save_attr_ids_.empty(); }
