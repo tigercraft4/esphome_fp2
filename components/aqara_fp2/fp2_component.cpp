@@ -171,6 +171,14 @@ void FP2Component::setup() {
   // Reset internal state
   waiting_for_ack_attr_id_ = AttrId::INVALID;
 
+  // ZONEMGMT-03/04 (12-01): rehydrate any runtime-added zones from the NVS
+  // registry BEFORE anything below can gate check_initialization_() (which
+  // only ever runs once the first UART radar frame arrives). This must run
+  // before the web-handler registration block below so the existing
+  // full-resend reconciliation in check_initialization_() sees the complete
+  // zones_ set (compile-time + rehydrated runtime) on the very first pass.
+  rehydrate_zone_registry_();
+
   // check_initialization_() always boots into WORK_MODE=3 (Zone Detection);
   // reflect that compiled default in the select immediately so it doesn't
   // show "unknown" until the user first interacts with it.
@@ -452,6 +460,11 @@ void FP2Component::save_zone_override_(uint8_t zone_id, const GridMap &grid, uin
   auto pref = global_preferences->make_preference<FP2ZoneOverride>(
       fnv1_hash("fp2_zone_override_" + std::to_string(zone_id)));
   pref.save(&ov);
+  // D-08 (12-01 retrofit): .save() alone only stages an in-RAM buffer -
+  // without this sync() a committed-looking override can be lost on a power
+  // cut before some unrelated core codepath happens to flush it
+  // (12-RESEARCH.md Finding 3). Closes a pre-existing Phase 9 durability gap.
+  global_preferences->sync();
 }
 
 bool FP2Component::load_global_zone_override_(FP2GlobalZoneOverride *out) {
@@ -465,6 +478,108 @@ void FP2Component::save_global_zone_override_(uint8_t presence_sensitivity) {
   auto pref = global_preferences->make_preference<FP2GlobalZoneOverride>(
       fnv1_hash("fp2_global_zone_override"));
   pref.save(&ov);
+  // D-08 (12-01 retrofit): see save_zone_override_() above - same durability
+  // gap, same fix.
+  global_preferences->sync();
+}
+
+// ZONEMGMT-03/04 (12-01): registry MEMBERSHIP load/save - exact mirror of
+// load_zone_override_()/save_zone_override_() above, but keyed on the fixed
+// literal "fp2_zone_registry_meta" (NOT per-zone-id), since membership is a
+// single 32-slot bitmask shared across all zone IDs.
+bool FP2Component::load_zone_registry_meta_(FP2ZoneRegistryMeta *out) {
+  auto pref = global_preferences->make_preference<FP2ZoneRegistryMeta>(
+      fnv1_hash("fp2_zone_registry_meta"));
+  return pref.load(out) && out->version == FP2_ZONE_REGISTRY_VERSION;
+}
+
+void FP2Component::save_zone_registry_meta_(uint32_t active_mask) {
+  FP2ZoneRegistryMeta meta{FP2_ZONE_REGISTRY_VERSION, active_mask};
+  auto pref = global_preferences->make_preference<FP2ZoneRegistryMeta>(
+      fnv1_hash("fp2_zone_registry_meta"));
+  pref.save(&meta);
+  // Finding 3 - do NOT omit this call. A registry mutation is not
+  // considered persisted until this sync() flushes it to flash.
+  global_preferences->sync();
+}
+
+// ZONEMGMT-03/04 (12-01): boot-time rehydration - reconstructs zones_ from
+// the NVS registry (active_mask + per-ID FP2ZoneOverride) BEFORE
+// check_initialization_() can ever run, so its existing full-resend
+// reconciliation naturally reconciles runtime-added zones with zero change
+// to check_initialization_() itself. Called once from setup() (12-RESEARCH.md
+// Pattern 1).
+void FP2Component::rehydrate_zone_registry_() {
+  FP2ZoneRegistryMeta meta;
+  if (!load_zone_registry_meta_(&meta)) {
+    // No runtime-added zones ever saved (or a version mismatch) - the
+    // compile-time zones_ set stands as-is. Not an error.
+    return;
+  }
+  for (uint8_t id = 0; id < 32; id++) {
+    if (!(meta.active_mask & (1u << id)))
+      continue;
+
+    // Pitfall 3: compile-time YAML zones and runtime-registry zones share
+    // the same 0-31 ID space via the same zones_ vector. A compile-time
+    // zone always owns its ID - never construct a duplicate runtime zone
+    // for an ID that is already present.
+    bool already_compiled = false;
+    for (const auto &z : zones_) {
+      if (z->id == id) {
+        already_compiled = true;
+        break;
+      }
+    }
+    if (already_compiled)
+      continue;
+
+    FP2ZoneOverride ov;
+    if (!load_zone_override_(id, &ov)) {
+      // active_mask says this ID is a registry-managed slot, but its
+      // content override is missing/corrupt. Never fabricate a default
+      // zone here - that would silently mask a registry-vs-override
+      // divergence. Log and skip; the slot simply stays absent from
+      // zones_ this boot.
+      ESP_LOGW(TAG, "rehydrate: active_mask bit %u set but no override - skipping", id);
+      continue;
+    }
+
+    FP2Zone *zone;
+    if (this->zone_slot_cache_[id] != nullptr) {
+      // Pitfall 4: reuse the ever-constructed object for this ID (from an
+      // earlier remove-then-re-add within this same boot session) rather
+      // than leaking a fresh allocation - ESPHome has no
+      // App.unregister_binary_sensor() to undo a prior registration.
+      zone = this->zone_slot_cache_[id];
+      zone->grid = ov.grid;
+      zone->sensitivity = ov.sensitivity;
+      if (ov.zone_type >= 0) {
+        zone->set_zone_type((uint8_t) ov.zone_type);
+      }
+      if (zone->presence_sensor != nullptr) {
+        zone->presence_sensor->set_internal(false);
+      }
+    } else {
+      zone = new FP2Zone(id, ov.grid, ov.sensitivity);
+      if (ov.zone_type >= 0) {
+        zone->set_zone_type((uint8_t) ov.zone_type);
+      }
+      // Finding 2: name/object_id strings must outlive the entity -
+      // set_name_and_object_id() stores raw, unowned const char* pointers.
+      // Heap-allocate and never free (matches ESPHome codegen's own
+      // lifetime assumption: a string literal baked into flash forever).
+      auto *name = new std::string("Zone " + std::to_string(id) + " Presence");
+      auto *object_id = new std::string("zone_" + std::to_string(id) + "_presence");
+      auto *sensor = new binary_sensor::BinarySensor();
+      sensor->set_name_and_object_id(name->c_str(), object_id->c_str());
+      sensor->set_device_class("occupancy");
+      App.register_binary_sensor(sensor);
+      zone->set_presence_sensor(sensor);
+      this->zone_slot_cache_[id] = zone;
+    }
+    zones_.push_back(zone);
+  }
 }
 
 // RUN-04 (09-01/09-03): live single-register Global Zone presence_sensitivity

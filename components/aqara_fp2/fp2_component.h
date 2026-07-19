@@ -286,6 +286,32 @@ struct FP2GlobalZoneOverride {
 
 static const uint32_t FP2_OVERRIDE_VERSION = 1;
 
+// ZONEMGMT-03 (12-01): fixed 32-slot NVS-backed registry MEMBERSHIP record -
+// which zone IDs (0-31) are currently runtime-registry-managed. Distinct
+// from FP2ZoneOverride (which stores a slot's *content*): this stores which
+// slots exist at all. Same packed-struct + versioned-key idiom as
+// FP2ZoneOverride/FP2GlobalZoneOverride above, but a DISTINCT version
+// constant (FP2_ZONE_REGISTRY_VERSION) - do not reuse FP2_OVERRIDE_VERSION,
+// this is a separate versioned blob (12-RESEARCH.md Pattern 2).
+struct FP2ZoneRegistryMeta {
+  uint32_t version;
+  uint32_t active_mask;  // bit N set = zone ID N is a runtime-registry-managed slot
+} __attribute__((packed));
+
+static const uint32_t FP2_ZONE_REGISTRY_VERSION = 1;
+
+// D-04: default content for a newly-created runtime zone - a full 14x14
+// active detection area. 14 repetitions of the byte pair 0x3F,0xFF (rows
+// 0-13, the 14x14 active area per parse_ascii_grid()'s offset_col=2
+// mapping) followed by 12 zero bytes (rows 14-19, outside the 14x14 active
+// area). Byte-verified against this project's own compiled test_zone
+// (12-RESEARCH.md Code Example 1).
+static const GridMap FULL_ACTIVE_GRID = {
+  0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF,
+  0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
 class FP2LocationSwitch : public switch_::Switch {
 public:
   void set_parent(FP2Component *parent) { parent_ = parent; }
@@ -543,6 +569,13 @@ public:
   // from the client beyond zone_id/sensitivity/zone_type, which
   // save_zone_to_sensor() already fully validates (V5).
   void save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type);
+  // ZONEMGMT-01/02 (12-01): public surface for the live zone registry -
+  // definitions land in Plan 02. Declared here now so the class surface is
+  // stable for this plan's rehydrate_zone_registry_() and Plan 02's HTTP
+  // handler wiring alike.
+  void add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int zone_type);
+  void remove_zone_at_runtime(uint8_t zone_id);
+  void json_get_free_slots(JsonObject root);
   // CR-01 fix (11-03): synchronous "a save is in flight" bookkeeping, set by
   // the /api/zones/save httpd handler *before* it schedules the deferred
   // save_zone_from_editor() call. This is a plain bool flag flip, not a
@@ -621,6 +654,15 @@ protected:
   bool load_global_zone_override_(FP2GlobalZoneOverride *out);
   void save_global_zone_override_(uint8_t presence_sensitivity);
 
+  // ZONEMGMT-03/04 (12-01): registry MEMBERSHIP load/save helpers (distinct
+  // from the per-zone-content overrides above) plus the boot-time
+  // rehydration entry point. load_* returns false (treated as "no runtime
+  // registry ever saved - compile-time zones_ stands as-is") on a missing
+  // entry OR a version mismatch, same idiom as load_zone_override_() above.
+  bool load_zone_registry_meta_(FP2ZoneRegistryMeta *out);
+  void save_zone_registry_meta_(uint32_t active_mask);
+  void rehydrate_zone_registry_();
+
   aqara_fp2_accel::AqaraFP2Accel *fp2_accel_{nullptr};
 
   GPIOPin *reset_pin_{nullptr};
@@ -661,6 +703,12 @@ protected:
 
   // Zones
   std::vector<FP2Zone*> zones_;
+  // Pitfall 4 (12-RESEARCH.md): ESPHome has no App.unregister_binary_sensor()
+  // - reuse an ever-constructed FP2Zone/BinarySensor object on re-add rather
+  // than leaking a fresh allocation every remove-then-re-add cycle within
+  // one uptime. Index is the zone ID (0-31); nullptr = never constructed
+  // this boot.
+  std::array<FP2Zone*, 32> zone_slot_cache_{};
   text_sensor::TextSensor *target_tracking_sensor_{nullptr};
   FP2LocationSwitch *location_report_switch_{nullptr};
   FP2OperatingModeSelect *operating_mode_select_{nullptr};
