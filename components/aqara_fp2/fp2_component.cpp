@@ -2331,5 +2331,27 @@ void FP2Component::json_get_map_data(JsonObject root) {
   }
 }
 
+// ZONEMGMT-01 (12-02): free-slot computation for the Add-Zone dropdown (D-01)
+// and the D-07 capacity-full UI state. Scans the LIVE zones_ union (compile-
+// time YAML zones + runtime-added zones) - never the NVS registry's
+// active_mask alone (Pitfall 3) - so a runtime add can never collide with a
+// compile-time zone's ID.
+void FP2Component::json_get_free_slots(JsonObject root) {
+  bool used[32] = {false};
+  for (const auto &zone : zones_) {
+    if (zone->id < 32) {
+      used[zone->id] = true;
+    }
+  }
+
+  JsonArray free_slots = root["free_slots"].to<JsonArray>();
+  for (uint8_t id = 0; id < 32; id++) {
+    if (!used[id]) {
+      free_slots.add(id);
+    }
+  }
+  root["full"] = (free_slots.size() == 0);
+}
+
 } // namespace aqara_fp2
 } // namespace esphome
