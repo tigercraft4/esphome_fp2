@@ -44,10 +44,12 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
   bool canHandle(esphome::web_server_idf::AsyncWebServerRequest *request) const override {
     auto method = request->method();
     std::string url = request->url();
-    if (method == HTTP_GET && (url == "/api/zones" || url == "/api/zones/status")) {
+    if (method == HTTP_GET &&
+        (url == "/api/zones" || url == "/api/zones/status" || url == "/api/zones/free-slots")) {
       return true;
     }
-    if (method == HTTP_POST && url == "/api/zones/save") {
+    if (method == HTTP_POST &&
+        (url == "/api/zones/save" || url == "/api/zones/create" || url == "/api/zones/delete")) {
       return true;
     }
     return false;
@@ -59,8 +61,14 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
       this->handle_get_zones_(request);
     } else if (request->method() == HTTP_GET && url == "/api/zones/status") {
       this->handle_get_status_(request);
+    } else if (request->method() == HTTP_GET && url == "/api/zones/free-slots") {
+      this->handle_get_free_slots_(request);
     } else if (request->method() == HTTP_POST && url == "/api/zones/save") {
       this->handle_post_save_(request);
+    } else if (request->method() == HTTP_POST && url == "/api/zones/create") {
+      this->handle_post_create_(request);
+    } else if (request->method() == HTTP_POST && url == "/api/zones/delete") {
+      this->handle_post_delete_(request);
     }
   }
 
@@ -168,6 +176,73 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
     esphome::App.scheduler.set_timeout(this->fp2_, "zone_editor_save", 1,
         [fp2, zone_id, sensitivity, zone_type]() {
           fp2->save_zone_from_editor((uint8_t) zone_id, (uint8_t) sensitivity, zone_type);
+        });
+
+    request->send(202, "application/json", R"({"status":"pending"})");
+  }
+
+  // POST /api/zones/create - ZONEMGMT-01: submit-then-poll deferred zone
+  // creation, sharing the /api/zones/save handler's WR-02/WR-03/CR-01
+  // precedents verbatim. zone_id and sensitivity are required; zone_type is
+  // optional, defaulting to -1 (unset). zone_id's valid range is tighter
+  // here (0-31) than save's 0-255, matching the registry's 32-slot ceiling.
+  // The only add_zone_at_runtime() reference is inside the scheduler lambda
+  // below - this method never mutates FP2Component state directly on the
+  // httpd task.
+  void handle_post_create_(esphome::web_server_idf::AsyncWebServerRequest *request) {
+    if (request->getParam("zone_id") == nullptr || request->getParam("sensitivity") == nullptr) {
+      request->send(400, "application/json", R"({"error":"zone_id and sensitivity are required"})");
+      return;
+    }
+
+    // WR-03: shared in-flight guard across save/create/delete - a create
+    // must not be allowed to race a save or a delete already in progress.
+    if (this->fp2_->save_pending()) {
+      request->send(409, "application/json", R"({"error":"a save is already in progress"})");
+      return;
+    }
+
+    // WR-02: strtol()+endptr+range validation before any narrowing cast, so
+    // garbage input is rejected with 400 instead of silently coerced.
+    const std::string zone_id_str = request->arg("zone_id");
+    char *end = nullptr;
+    long zone_id_l = strtol(zone_id_str.c_str(), &end, 10);
+    if (end == zone_id_str.c_str() || *end != '\0' || zone_id_l < 0 || zone_id_l > 31) {
+      request->send(400, "application/json", R"({"error":"zone_id must be an integer 0-31"})");
+      return;
+    }
+
+    const std::string sensitivity_str = request->arg("sensitivity");
+    end = nullptr;
+    long sensitivity_l = strtol(sensitivity_str.c_str(), &end, 10);
+    if (end == sensitivity_str.c_str() || *end != '\0' || sensitivity_l < 1 || sensitivity_l > 3) {
+      request->send(400, "application/json", R"({"error":"sensitivity must be 1-3"})");
+      return;
+    }
+
+    int zone_id = (int) zone_id_l;
+    int sensitivity = (int) sensitivity_l;
+    int zone_type = -1;
+    if (request->getParam("zone_type") != nullptr) {
+      const std::string zone_type_str = request->arg("zone_type");
+      end = nullptr;
+      long zone_type_l = strtol(zone_type_str.c_str(), &end, 10);
+      if (end == zone_type_str.c_str() || *end != '\0') {
+        request->send(400, "application/json", R"({"error":"zone_type must be an integer"})");
+        return;
+      }
+      zone_type = (int) zone_type_l;
+    }
+
+    // CR-01: mark the mutation as pending synchronously, before scheduling,
+    // so a GET /api/zones/status landing immediately after this 202 can
+    // never observe a stale {pending:false}.
+    this->fp2_->mark_editor_save_queued();
+
+    esphome::aqara_fp2::FP2Component *fp2 = this->fp2_;
+    esphome::App.scheduler.set_timeout(this->fp2_, "zone_add", 1,
+        [fp2, zone_id, sensitivity, zone_type]() {
+          fp2->add_zone_at_runtime((uint8_t) zone_id, (uint8_t) sensitivity, zone_type);
         });
 
     request->send(202, "application/json", R"({"status":"pending"})");
