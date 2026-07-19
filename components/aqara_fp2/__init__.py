@@ -3,8 +3,9 @@ import json
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
-from esphome.components import binary_sensor, select, sensor, switch, uart
+from esphome.components import binary_sensor, select, sensor, switch, uart, web_server, web_server_base
 from esphome.components import text_sensor as text_sensor_
+from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
 from esphome.const import (
     CONF_DEVICE_CLASS,
     CONF_DEVICE_ID,
@@ -15,6 +16,7 @@ from esphome.const import (
     CONF_NAME,
     CONF_SECOND,
     CONF_MOTION,
+    CONF_WEB_SERVER_ID,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_OCCUPANCY,
     DEVICE_CLASS_MOTION,
@@ -293,6 +295,12 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_DEBUG_MODE, default=False): cv.boolean,
             cv.Optional(CONF_TELNET_ENABLE, default=False): cv.boolean,
             cv.Optional(CONF_TELNET_PORT, default=23): cv.port,
+            # WEBUI-01/02 (11-04): opt-in references to the existing
+            # web_server so the device-hosted zone editor's routes can be
+            # registered in FP2Component::setup(); omit both to keep
+            # diagnostics-only web_server behavior.
+            cv.Optional(CONF_WEB_SERVER_ID): cv.use_id(web_server.WebServer),
+            cv.Optional(CONF_WEB_SERVER_BASE_ID): cv.use_id(web_server_base.WebServerBase),
             cv.Optional(CONF_RADAR_TEMPERATURE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_CELSIUS,
                 icon=ICON_THERMOMETER,
@@ -537,3 +545,13 @@ async def to_code(config):
 
     accel = await cg.get_variable(config["accel"])
     cg.add(var.set_fp2_accel(accel))
+
+    # WEBUI-01/02 (11-04): hand the resolved WebServerBase*/WebServer* to
+    # FP2Component only when the config opts in - otherwise the members stay
+    # null and setup() registers nothing (see prohibitions in 11-04-PLAN.md).
+    if CONF_WEB_SERVER_BASE_ID in config:
+        wsb = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
+        cg.add(var.set_web_server_base(wsb))
+    if CONF_WEB_SERVER_ID in config:
+        ws = await cg.get_variable(config[CONF_WEB_SERVER_ID])
+        cg.add(var.set_web_server(ws))
