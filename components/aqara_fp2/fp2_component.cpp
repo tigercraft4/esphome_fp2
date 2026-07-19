@@ -610,6 +610,23 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     }
   }
 
+  // WR-01 fix (12-REVIEW): zone_type must be -1 (sentinel = not set) or a
+  // ZONE_TYPES value - same allowlist as save_zone_to_sensor()'s check (c).
+  // Pushed down here (rather than only in handle_post_create_) so it applies
+  // uniformly to every caller of add_zone_at_runtime(), not just the one
+  // that happens to validate it today. Without this, an out-of-range
+  // zone_type would be truncated via (uint8_t) cast, persisted to NVS, and
+  // written to the radar's DETECT_ZONE_TYPE register as a value the
+  // firmware was never designed to receive.
+  if (zone_type != -1 && zone_type != 0 && zone_type != 2 && zone_type != 10 &&
+      zone_type != 11 && zone_type != 13 && zone_type != 14 && zone_type != 15 &&
+      zone_type != 23 && zone_type != 36) {
+    ESP_LOGW(TAG, "add_zone_at_runtime: invalid zone_type %d", zone_type);
+    save_failed_ = true;
+    save_error_ = std::string("invalid zone_type ") + std::to_string(zone_type);
+    return;
+  }
+
   ESP_LOGI(TAG, "Adding runtime zone %u (sensitivity=%u, zone_type=%d)", zone_id, sensitivity,
            zone_type);
   save_failed_ = false;
