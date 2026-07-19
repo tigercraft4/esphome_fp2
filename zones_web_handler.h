@@ -106,6 +106,19 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
       return;
     }
 
+    // WR-03: reject a second save while one is already in flight instead of
+    // silently superseding it. App.scheduler.set_timeout() below uses a
+    // fixed "zone_editor_save" name, and ESPHome's scheduler
+    // cancels/replaces an existing pending timeout registered under the
+    // same (component, name) pair - a second POST would otherwise silently
+    // drop the first save even though it already received a 202 promising
+    // it would happen. save_pending() is now synchronous with the 202
+    // response (CR-01), so this check reliably catches the in-flight window.
+    if (this->fp2_->save_pending()) {
+      request->send(409, "application/json", R"({"error":"a save is already in progress"})");
+      return;
+    }
+
     // WR-02: atoi() returns 0 for non-numeric input and the (uint8_t) cast
     // in the scheduler lambda below silently truncates out-of-range values
     // modulo 256 (e.g. sensitivity=259 -> atoi -> 259 -> (uint8_t)259 -> 3,
