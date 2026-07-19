@@ -189,6 +189,16 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
   // The only add_zone_at_runtime() reference is inside the scheduler lambda
   // below - this method never mutates FP2Component state directly on the
   // httpd task.
+  //
+  // WR-03 (12-REVIEW): this endpoint has NO CSRF protection - no origin/
+  // referrer check, no CSRF token, and (per project convention) no auth by
+  // default. A malicious auto-submitting form on any page a LAN user's
+  // browser visits can create a zone with zero interaction with this
+  // device's own UI. Larger blast radius than /api/zones/save (which can
+  // only mutate an already-compiled zone, not delete one) - see the
+  // matching warning logged at setup() time. Mitigate by enabling the
+  // ESPHome `web_server: auth:` block if this device is reachable by
+  // untrusted clients on the LAN.
   void handle_post_create_(esphome::web_server_idf::AsyncWebServerRequest *request) {
     if (request->getParam("zone_id") == nullptr || request->getParam("sensitivity") == nullptr) {
       request->send(400, "application/json", R"({"error":"zone_id and sensitivity are required"})");
@@ -256,6 +266,11 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
   // colliding on the same (component, name) scheduler slot (WR-03 root
   // cause). remove_zone_at_runtime() is referenced ONLY inside the
   // scheduler lambda below.
+  //
+  // WR-03 (12-REVIEW): NO CSRF protection - see handle_post_create_()'s
+  // identical warning above. This is the more dangerous of the two: a
+  // one-line auto-submitting HTML form silently deletes a configured zone
+  // with zero user interaction with this device's own UI.
   void handle_post_delete_(esphome::web_server_idf::AsyncWebServerRequest *request) {
     if (request->getParam("zone_id") == nullptr) {
       request->send(400, "application/json", R"({"error":"zone_id is required"})");

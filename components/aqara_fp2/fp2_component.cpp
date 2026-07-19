@@ -216,6 +216,13 @@ void FP2Component::setup() {
   if (this->web_server_base_ != nullptr) {
     this->web_server_base_->add_handler(new ::ZonesPageHandler());
     this->web_server_base_->add_handler(new ::ZonesApiHandler(this));
+    // WR-03 (12-REVIEW): /api/zones/create and /api/zones/delete are
+    // destructive, unauthenticated-by-default POST endpoints with no CSRF
+    // protection - mirrors the telnet bridge's own LAN-ONLY warning above.
+    // Consider adding a `web_server: auth:` block in YAML if this device is
+    // reachable by untrusted clients on the LAN.
+    ESP_LOGW(TAG, "zone editor /api/zones/create and /api/zones/delete are LAN-ONLY, "
+                  "NO CSRF PROTECTION. Never expose this device's web server to the internet.");
 
     if (this->web_server_ != nullptr) {
       auto *sse = new esphome::web_server_idf::AsyncEventSource("/zones/events", this->web_server_);
