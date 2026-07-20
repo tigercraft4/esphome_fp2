@@ -644,6 +644,30 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     return;
   }
 
+  // CR-02 fix (12-REVIEW #2): reject re-creating a zone_id that is present in
+  // zones_ (active or not - the duplicate-active-ID guard above only catches
+  // the still-active case) but was never tracked in zone_slot_cache_. That
+  // combination means this ID belongs to a compile-time YAML zone that was
+  // removed via /api/zones/delete - zone_slot_cache_ is populated only by
+  // rehydrate_zone_registry_() and this function's own reuse branch below,
+  // never by set_zones() (the compile-time path), so the reuse-vs-construct
+  // branch below would otherwise take the "construct fresh" path and
+  // push_back() a SECOND FP2Zone with the same id. Every id-keyed radar
+  // report dispatch loop (DETECT_ZONE_MOTION/ZONE_PRESENCE/
+  // ZONE_PEOPLE_NUMBER) breaks on first match, so the new, user-visible
+  // entity would never receive an update for the rest of the boot session.
+  for (const auto &z : zones_) {
+    if (z->id == zone_id && this->zone_slot_cache_[zone_id] == nullptr) {
+      ESP_LOGW(TAG, "add_zone_at_runtime: zone_id %u belongs to a compile-time zone and cannot "
+                    "be re-created here",
+               zone_id);
+      save_failed_ = true;
+      save_error_ = std::string("zone_id ") + std::to_string(zone_id) +
+                    " belongs to a compile-time zone and cannot be re-created here";
+      return;
+    }
+  }
+
   ESP_LOGI(TAG, "Adding runtime zone %u (sensitivity=%u, zone_type=%d)", zone_id, sensitivity,
            zone_type);
   save_failed_ = false;
