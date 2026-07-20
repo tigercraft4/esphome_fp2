@@ -74,9 +74,16 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
 
  protected:
   // GET /api/zones - WEBUI-01: read-only zone list + live geometry fields
-  // for the /zones page's list view and live overlay. Safe from the httpd
-  // task because zones_/mounting fields are immutable post-setup (Pitfall 3).
-  // An empty zones_ serializes to an empty zones array, not an error.
+  // for the /zones page's list view and live overlay.
+  // CR-01 fix (12-REVIEW iter2): zones_/mounting fields are NOT immutable
+  // post-setup anymore - add_zone_at_runtime()/remove_zone_at_runtime() run
+  // on the main-loop task and mutate zones_ while this handler runs on the
+  // httpd task. Safety now comes from FP2Component::zones_'s own
+  // reserve(32)-at-boot + never-erase/deactivate-in-place invariants (see
+  // fp2_component.h's zones_ comment), which keep this vector's backing
+  // storage stable for a concurrent range-for like json_get_map_data()'s.
+  // An empty (or all-inactive) zones_ serializes to an empty zones array,
+  // not an error.
   void handle_get_zones_(esphome::web_server_idf::AsyncWebServerRequest *request) {
     JsonDocument doc;
     JsonObject root = doc.to<JsonObject>();
@@ -306,9 +313,11 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
 
   // GET /api/zones/free-slots - ZONEMGMT-04: dropdown data source for the
   // Add-Zone UI (D-01/D-07). Mirrors handle_get_zones_ exactly - a
-  // read-only scan of the live zones_ union, safe on the httpd task because
-  // zones_ is only ever mutated on the main loop (deferred mutations
-  // above); this reflects a consistent snapshot taken between mutations.
+  // read-only scan of the live zones_ union. CR-01 fix (12-REVIEW iter2):
+  // see handle_get_zones_()'s updated comment above - safety against the
+  // main loop's concurrent push_back()/deactivate-in-place comes from
+  // zones_'s reserve(32)-at-boot + never-erase invariants, not from zones_
+  // being immutable.
   void handle_get_free_slots_(esphome::web_server_idf::AsyncWebServerRequest *request) {
     JsonDocument doc;
     JsonObject root = doc.to<JsonObject>();

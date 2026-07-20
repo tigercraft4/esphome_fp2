@@ -123,6 +123,12 @@ struct FP2Zone : public Component {
   bool motion_active{false};
   uint8_t zone_type{0};
   bool has_zone_type{false};
+  // CR-01 fix (12-REVIEW iter2): true unless removed via remove_zone_at_runtime().
+  // zones_ never erases an FP2Zone* once constructed (see that function's
+  // comment) - inactive entries stay in the vector, hidden, so every read of
+  // zones_ (including the httpd task's GET /api/zones and /api/zones/free-slots)
+  // must skip entries where active is false.
+  bool active{true};
 };
 
 class FP2Component;
@@ -702,6 +708,14 @@ protected:
   binary_sensor::BinarySensor *global_motion_sensor_{nullptr};
 
   // Zones
+  // CR-01 fix (12-REVIEW iter2): reserve(32) in setup() fixes this vector's
+  // backing storage for the lifetime of the program so push_back() in
+  // add_zone_at_runtime() never reallocates - the httpd task's
+  // handle_get_zones_()/handle_get_free_slots_() range-iterate this same
+  // vector with no lock (see zones_web_handler.h). remove_zone_at_runtime()
+  // never erase()s either, for the same reason (erase() shifts the buffer in
+  // place); it flips FP2Zone::active instead. Every reader must skip
+  // inactive entries.
   std::vector<FP2Zone*> zones_;
   // Pitfall 4 (12-RESEARCH.md): ESPHome has no App.unregister_binary_sensor()
   // - reuse an ever-constructed FP2Zone/BinarySensor object on re-add rather

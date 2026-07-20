@@ -179,6 +179,13 @@ void FP2Component::setup() {
   // zones_ set (compile-time + rehydrated runtime) on the very first pass.
   rehydrate_zone_registry_();
 
+  // CR-01 fix (12-REVIEW iter2): fix zones_'s backing storage now, before the
+  // web-handler registration block below can ever let the httpd task start
+  // reading it concurrently. 32 is the protocol's hard ceiling on zone IDs
+  // (0-31), so no future add_zone_at_runtime() push_back() can ever exceed
+  // this capacity and trigger a reallocation the httpd task could race.
+  zones_.reserve(32);
+
   // check_initialization_() always boots into WORK_MODE=3 (Zone Detection);
   // reflect that compiled default in the select immediately so it doesn't
   // show "unknown" until the user first interacts with it.
@@ -608,8 +615,11 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
   // BOTH compile-time YAML zones and already-runtime-added zones, since they
   // share one 0-31 ID space and one zones_ vector. Never derive this check
   // from the NVS active_mask alone.
+  // CR-01 fix (12-REVIEW iter2): only an *active* entry counts as "in use" -
+  // zones_ never erases a removed zone anymore (see remove_zone_at_runtime()),
+  // so a previously-removed ID's now-inactive FP2Zone* must not block re-add.
   for (const auto &z : zones_) {
-    if (z->id == zone_id) {
+    if (z->active && z->id == zone_id) {
       ESP_LOGW(TAG, "add_zone_at_runtime: zone_id %u already in use", zone_id);
       save_failed_ = true;
       save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " already in use";
@@ -669,6 +679,11 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     if (zone->presence_sensor != nullptr) {
       zone->presence_sensor->set_internal(false);
     }
+    // CR-01 fix (12-REVIEW iter2): this object is already an entry in
+    // zones_ from an earlier add-then-remove cycle this boot session (never
+    // erased, only deactivated below) - reactivate in place. Do NOT
+    // push_back() again, or this ID would appear twice in zones_.
+    zone->active = true;
   } else {
     zone = new FP2Zone(zone_id, grid, sensitivity);
     if (zone_type >= 0) {
@@ -686,8 +701,12 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     App.register_binary_sensor(sensor);  // D-02: visible to HA after next ListEntitiesRequest
     zone->set_presence_sensor(sensor);
     this->zone_slot_cache_[zone_id] = zone;
+    // CR-01 fix (12-REVIEW iter2): first time this ID has ever been used
+    // this boot - append exactly once. zones_.reserve(32) in setup()
+    // guarantees this can never reallocate the buffer a concurrent
+    // httpd-task reader might be range-iterating.
+    zones_.push_back(zone);
   }
-  zones_.push_back(zone);
 
   // UART sequence - DEFINE first.
   std::vector<uint8_t> payload;
@@ -714,6 +733,11 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
   // exactly (the single source of truth for "what is active now").
   std::vector<uint8_t> activations(32, 0);
   for (const auto &z : zones_) {
+    // CR-01 fix (12-REVIEW iter2): zones_ now retains removed zones as
+    // inactive entries rather than erasing them - skip them so a
+    // deactivated zone is never re-activated on the radar by this rebuild.
+    if (!z->active)
+      continue;
     activations[z->id] = z->id;
   }
   enqueue_command_blob2_(AttrId::ZONE_ACTIVATION_LIST, activations);
@@ -730,8 +754,13 @@ void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
   // must run first, before the not-found rejection below, so a rejected
   // delete call also clears the flag handle_post_delete_ set synchronously.
   this->editor_save_queued_ = false;
+  // CR-01 fix (12-REVIEW iter2): match only an *active* entry - a
+  // previously-removed ID's now-inactive FP2Zone* stays in zones_ (see
+  // below), so without the active check a double-remove would silently
+  // "succeed" a second time on the same already-inactive object instead of
+  // correctly reporting zone_id not found.
   auto it = std::find_if(zones_.begin(), zones_.end(),
-                          [zone_id](FP2Zone *z) { return z->id == zone_id; });
+                          [zone_id](FP2Zone *z) { return z->active && z->id == zone_id; });
   if (it == zones_.end()) {
     ESP_LOGW(TAG, "remove_zone_at_runtime: zone_id %u not found", zone_id);
     save_failed_ = true;
@@ -745,13 +774,22 @@ void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
   pending_save_attr_ids_.clear();
 
   FP2Zone *zone = *it;
-  // Erase from the in-memory set FIRST so the activation-list rebuild below
-  // reads the post-removal membership (Pattern 5).
-  zones_.erase(it);
+  // CR-01 fix (12-REVIEW iter2): deactivate in place FIRST (so the
+  // activation-list rebuild below reads the post-removal membership,
+  // preserving Pattern 5's ordering) instead of zones_.erase(it). erase()
+  // shifts every subsequent element's storage in place, which is unsafe to
+  // do while the httpd task may be concurrently range-iterating this same
+  // vector in handle_get_zones_()/handle_get_free_slots_() with no lock.
+  // The FP2Zone object stays alive and in zones_ (already cached in
+  // zone_slot_cache_ for reuse - Pitfall 4), just marked inactive; every
+  // reader of zones_ must skip inactive entries.
+  zone->active = false;
 
   // UART sequence - DEACTIVATE first.
   std::vector<uint8_t> activations(32, 0);
   for (const auto &z : zones_) {
+    if (!z->active)
+      continue;
     activations[z->id] = z->id;
   }
   enqueue_command_blob2_(AttrId::ZONE_ACTIVATION_LIST, activations);
@@ -841,9 +879,13 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
   // (a) zone_id must match an actually-compiled zone (Pitfall 2) - a linear
   // search of zones_, NOT a bare 0-31 protocol-range check. zones_ is tiny
   // (0-2 entries in practice), so this is cheap.
+  // CR-01 fix (12-REVIEW iter2): a runtime-removed zone stays in zones_ as
+  // an inactive entry (never erased - see remove_zone_at_runtime()), so
+  // this membership check must require active, or a save could be accepted
+  // for a zone the user just removed.
   bool zone_found = false;
   for (const auto &zone : zones_) {
-    if (zone->id == zone_id) {
+    if (zone->active && zone->id == zone_id) {
       zone_found = true;
       break;
     }
@@ -952,8 +994,13 @@ void FP2Component::save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, i
   // happens immediately before the call that populates the other field.
   this->editor_save_queued_ = false;
   std::string grid_hex;
+  // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) entries -
+  // save_zone_to_sensor()'s own (a) check below already rejects a removed
+  // zone_id, so leaving grid_hex empty for it is correct either way, but
+  // matching the active-only convention avoids reading a stale grid off a
+  // hidden/removed zone.
   for (const auto &zone : zones_) {
-    if (zone->id == zone_id) {
+    if (zone->active && zone->id == zone_id) {
       // Build all 40 bytes as an 80-char lowercase hex string. Deliberately
       // NOT grid_to_hex_card_format() - that helper emits only 56 chars (14
       // rows) for the /zones list view's display, which would fail
@@ -1076,8 +1123,13 @@ void FP2Component::loop() {
   process_command_queue_();
 
   // Release zone motion sensors once their debounce timeout expires.
+  // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) zones -
+  // they're already hidden/invalidated by remove_zone_at_runtime() and
+  // should not have their debounce state ticked further.
   uint32_t now = millis();
   for (auto &z : zones_) {
+    if (!z->active)
+      continue;
     z->tick_motion(now);
   }
 }
@@ -1170,6 +1222,12 @@ void FP2Component::check_initialization_() {
     // 3. Zones
     std::vector<uint8_t> activations(32, 0);
     for (const auto &zone : zones_) {
+      // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) zones -
+      // possible in the rare case a remove happened before the very first
+      // radar frame arrived (this whole block only ever runs once, gated by
+      // init_done_). zones_ never erases a removed zone anymore.
+      if (!zone->active)
+        continue;
       // RUN-02 (09-03): resolve grid/sensitivity/zone_type into LOCAL
       // variables from a saved NVS override, if present, BEFORE building any
       // of this zone's register payloads below (09-RESEARCH.md Pitfall 4 -
@@ -1213,6 +1271,10 @@ void FP2Component::check_initialization_() {
     enqueue_command_blob2_(AttrId::ZONE_ACTIVATION_LIST, activations);
 
     for (const auto &zone : zones_) {
+        // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) zones -
+        // see the identical guard on the activation-list loop above.
+        if (!zone->active)
+          continue;
         // Close/Away Enable default?
         // Trace: 0x0153 Zone Close Away Enable.
         // We can enable it by default for now or add config options later.
@@ -1256,7 +1318,11 @@ void FP2Component::check_initialization_() {
     }
 
     // 6. Publish zone map sensors
+    // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) zones -
+    // see the identical guard above.
     for (const auto &zone : zones_) {
+      if (!zone->active)
+        continue;
       if (zone->map_sensor != nullptr) {
         zone->map_sensor->publish_state(grid_to_hex_card_format(zone->grid));
       }
@@ -1266,6 +1332,8 @@ void FP2Component::check_initialization_() {
     // After radar reset, we know there is no occupancy/motion detected yet
     ESP_LOGI(TAG, "Publishing initial zone states (no presence/motion after reset)");
     for (const auto &zone : zones_) {
+      if (!zone->active)
+        continue;
       zone->publish_presence(false);
       zone->reset_motion();
     }
@@ -2353,9 +2421,22 @@ void FP2Component::json_get_map_data(JsonObject root) {
   }
 
   // Zones
-  if (!zones_.empty()) {
+  // CR-01 fix (12-REVIEW iter2): zones_ now retains removed zones as
+  // inactive entries (never erased - see remove_zone_at_runtime()), so
+  // "any zones to list" must check for an active entry, not just a
+  // non-empty vector, and the loop below must skip inactive entries.
+  bool has_active_zone = false;
+  for (FP2Zone *zone : zones_) {
+    if (zone->active) {
+      has_active_zone = true;
+      break;
+    }
+  }
+  if (has_active_zone) {
     JsonArray zones_array = root["zones"].to<JsonArray>();
     for (FP2Zone *zone : zones_) {
+      if (!zone->active)
+        continue;
       JsonObject zone_obj = zones_array.add<JsonObject>();
       // WEBUI-01 (11-01): the device-hosted /zones list view needs a stable
       // zone_id to submit on Save (D-02) - card.js never needed this because
@@ -2384,7 +2465,9 @@ void FP2Component::json_get_map_data(JsonObject root) {
 void FP2Component::json_get_free_slots(JsonObject root) {
   bool used[32] = {false};
   for (const auto &zone : zones_) {
-    if (zone->id < 32) {
+    // CR-01 fix (12-REVIEW iter2): an inactive (removed) entry's ID must
+    // show up as free again - zones_ never erases a removed zone anymore.
+    if (zone->active && zone->id < 32) {
       used[zone->id] = true;
     }
   }
