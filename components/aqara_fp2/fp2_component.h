@@ -597,9 +597,23 @@ public:
   void mark_editor_save_queued() { editor_save_queued_ = true; }
   // Read by the wait_until: condition lambda and api.respond lambdas in the
   // fp2_save_global_zone_to_sensor HA action (fp2-sala.yaml/example_config.yaml).
-  bool save_pending() { return editor_save_queued_ || !pending_save_attr_ids_.empty(); }
+  // CR-01 fix (12-REVIEW #2): pending_save_attr_ids_ (a std::vector<AttrId>)
+  // is mutated with .clear()/.push_back()/.erase() exclusively on the
+  // main-loop task; reading its .empty() state directly from the httpd task
+  // (zones_web_handler.h's handle_get_status_(), polled every second) races
+  // those mutations - the same hazard class CR-01 (iter3) fixed for zones_.
+  // save_batch_in_progress_ is a plain bool set/cleared only at well-defined
+  // batch start/end transition points (see its declaration below), never
+  // read mid-mutation, so it is safe to read cross-task without a lock.
+  bool save_pending() { return editor_save_queued_ || save_batch_in_progress_; }
   bool save_ok() { return !save_failed_; }
-  std::string save_error() { return save_error_; }
+  // CR-01 fix (12-REVIEW #2): save_error_ is a std::string reassigned
+  // exclusively on the main-loop task; copy-constructing it from the httpd
+  // task while a reassignment is in flight can dereference a heap buffer
+  // the main-loop task just freed (UB). Only surface it once the batch has
+  // fully settled - during an in-flight batch there is nothing meaningful
+  // to report yet anyway (callers gate display on save_ok()/save_pending()).
+  std::string save_error() { return save_batch_in_progress_ ? std::string() : save_error_; }
 
 protected:
   // Internal logic
@@ -836,6 +850,17 @@ protected:
   std::vector<AttrId> pending_save_attr_ids_;
   bool save_failed_{false};
   std::string save_error_;
+  // CR-01 fix (12-REVIEW #2): scalar mirror of "a save batch is currently
+  // open", set at the start of every save_*_to_sensor()/add_zone_at_runtime()/
+  // remove_zone_at_runtime() batch (alongside the existing
+  // pending_save_attr_ids_.clear()) and cleared only in
+  // process_command_queue_()'s timeout-exhaustion branch or once
+  // pending_save_attr_ids_ drains to empty in handle_ack_(). Exists so
+  // save_pending()/save_error() can be read cross-task (httpd task, via
+  // zones_web_handler.h's handle_get_status_()) as a plain bool / gated
+  // string instead of directly inspecting pending_save_attr_ids_, which is
+  // mutated with push_back()/erase() only on the main-loop task.
+  bool save_batch_in_progress_{false};
   // CR-01 fix (11-03): true from the moment the /api/zones/save httpd
   // handler schedules the deferred save, until save_zone_from_editor()
   // actually runs on the main loop and clears it. See mark_editor_save_queued().

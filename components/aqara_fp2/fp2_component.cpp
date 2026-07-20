@@ -649,6 +649,8 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
   save_failed_ = false;
   save_error_.clear();
   pending_save_attr_ids_.clear();
+  // CR-01 fix (12-REVIEW #2): open the batch for save_pending()'s cross-task read.
+  save_batch_in_progress_ = true;
 
   // D-04: a newly-created zone defaults to a full 14x14 active grid - it must
   // be immediately functional since grid painting doesn't exist until Phase 13.
@@ -772,6 +774,8 @@ void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
   save_failed_ = false;
   save_error_.clear();
   pending_save_attr_ids_.clear();
+  // CR-01 fix (12-REVIEW #2): open the batch for save_pending()'s cross-task read.
+  save_batch_in_progress_ = true;
 
   FP2Zone *zone = *it;
   // CR-01 fix (12-REVIEW iter2): deactivate in place FIRST (so the
@@ -847,6 +851,8 @@ void FP2Component::save_global_zone_to_sensor(uint8_t sensitivity) {
   ESP_LOGI(TAG, "Queueing Global Zone presence_sensitivity save = %u", sensitivity);
   save_failed_ = false;
   save_error_.clear();
+  // CR-01 fix (12-REVIEW #2): open the batch for save_pending()'s cross-task read.
+  save_batch_in_progress_ = true;
   enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, sensitivity);
   pending_save_attr_ids_.push_back(AttrId::PRESENCE_DETECT_SENSITIVITY);
 
@@ -944,6 +950,8 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
   save_failed_ = false;
   save_error_.clear();
   pending_save_attr_ids_.clear();
+  // CR-01 fix (12-REVIEW #2): open the batch for save_pending()'s cross-task read.
+  save_batch_in_progress_ = true;
 
   // 1. ZONE_MAP (0x0114): [ZoneID] [40-byte grid], BLOB2.
   std::vector<uint8_t> payload;
@@ -1367,6 +1375,9 @@ void FP2Component::process_command_queue_() {
             save_failed_ = true;
             save_error_ = std::string("timed out writing ") + attr_id_to_string_(cmd.attr_id);
             pending_save_attr_ids_.clear();
+            // CR-01 fix (12-REVIEW #2): close the batch - save_error_ above is
+            // now safe for the httpd task to read via save_error().
+            save_batch_in_progress_ = false;
           }
           command_queue_.pop_front();
           waiting_for_ack_attr_id_ = AttrId::INVALID;
@@ -1657,6 +1668,12 @@ void FP2Component::handle_ack_(AttrId attr_id) {
     pending_save_attr_ids_.erase(
         std::remove(pending_save_attr_ids_.begin(), pending_save_attr_ids_.end(), attr_id),
         pending_save_attr_ids_.end());
+    // CR-01 fix (12-REVIEW #2): the batch drained to empty with every write
+    // ACKed - close it so save_pending()/save_error() are safe for the httpd
+    // task to read (save_failed_ is still false on this success path).
+    if (pending_save_attr_ids_.empty()) {
+      save_batch_in_progress_ = false;
+    }
   } else {
     ESP_LOGW(TAG, "Unexpected ACK 0x%04X (Waiting for 0x%04X)", attr_id,
              (uint16_t) waiting_for_ack_attr_id_);
