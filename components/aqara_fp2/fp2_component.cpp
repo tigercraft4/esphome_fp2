@@ -596,6 +596,19 @@ void FP2Component::rehydrate_zone_registry_() {
   }
 }
 
+// WR-02 fix (12-REVIEW #2): single source of truth for the zone_type
+// allowlist, previously duplicated verbatim as a chain of != comparisons in
+// both add_zone_at_runtime() and save_zone_to_sensor(). Must be kept in sync
+// with ZONE_TYPES in components/aqara_fp2/__init__.py by hand - factoring
+// this into one helper means a future update only has one call site to miss.
+// -1 is the sentinel for "not set" (caller did not request a zone_type
+// change), not a real ZONE_TYPES value.
+static bool fp2_is_valid_zone_type_(int zone_type) {
+  return zone_type == -1 || zone_type == 0 || zone_type == 2 || zone_type == 10 ||
+         zone_type == 11 || zone_type == 13 || zone_type == 14 || zone_type == 15 ||
+         zone_type == 23 || zone_type == 36;
+}
+
 // ZONEMGMT-01 (12-02): add a new zone at runtime with zero YAML edits or
 // reflash. Define-before-activate ordering (12-RESEARCH.md Pattern 4):
 // ZONE_MAP/ZONE_SENSITIVITY/[DETECT_ZONE_TYPE]/ZONE_CLOSE_AWAY_ENABLE are
@@ -635,9 +648,9 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
   // zone_type would be truncated via (uint8_t) cast, persisted to NVS, and
   // written to the radar's DETECT_ZONE_TYPE register as a value the
   // firmware was never designed to receive.
-  if (zone_type != -1 && zone_type != 0 && zone_type != 2 && zone_type != 10 &&
-      zone_type != 11 && zone_type != 13 && zone_type != 14 && zone_type != 15 &&
-      zone_type != 23 && zone_type != 36) {
+  // WR-02 fix (12-REVIEW #2): allowlist factored into fp2_is_valid_zone_type_()
+  // so this and save_zone_to_sensor()'s identical check can't drift apart.
+  if (!fp2_is_valid_zone_type_(zone_type)) {
     ESP_LOGW(TAG, "add_zone_at_runtime: invalid zone_type %d", zone_type);
     save_failed_ = true;
     save_error_ = std::string("invalid zone_type ") + std::to_string(zone_type);
@@ -937,9 +950,9 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
   }
 
   // (c) zone_type must be -1 (sentinel = not set) or a ZONE_TYPES value.
-  if (zone_type != -1 && zone_type != 0 && zone_type != 2 && zone_type != 10 &&
-      zone_type != 11 && zone_type != 13 && zone_type != 14 && zone_type != 15 &&
-      zone_type != 23 && zone_type != 36) {
+  // WR-02 fix (12-REVIEW #2): allowlist factored into fp2_is_valid_zone_type_()
+  // so this and add_zone_at_runtime()'s identical check can't drift apart.
+  if (!fp2_is_valid_zone_type_(zone_type)) {
     ESP_LOGW(TAG, "save_zone_to_sensor: invalid zone_type %d", zone_type);
     save_failed_ = true;
     save_error_ = std::string("invalid zone_type ") + std::to_string(zone_type);
