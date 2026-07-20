@@ -735,7 +735,18 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body
     })
-      .then(function () {
+      .then(function (resp) {
+        // WR-01 (12-REVIEW iter2): don't blindly poll the shared
+        // /api/zones/status endpoint on a rejected POST (e.g. 409 from
+        // another in-flight save/create/delete, or 400 on bad input) - that
+        // would misreport an unrelated in-flight operation's outcome as
+        // this save's own result. Matches handleAddClick()/
+        // handleRemoveClick()'s WR-02 (12-REVIEW) guard exactly.
+        if (!resp.ok) {
+          return resp.json().catch(function () { return {}; }).then(function (data) {
+            finishSave(row, saveBtn, false, data.error || ('request rejected (' + resp.status + ')'));
+          });
+        }
         pollSaveStatus(row, saveBtn);
       })
       .catch(function () {
@@ -751,14 +762,14 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
           window.setTimeout(function () { pollSaveStatus(row, saveBtn); }, 1000);
           return;
         }
-        finishSave(row, saveBtn, data.ok === true);
+        finishSave(row, saveBtn, data.ok === true, data.error);
       })
       .catch(function () {
         finishSave(row, saveBtn, false);
       });
   }
 
-  function finishSave(row, saveBtn, ok) {
+  function finishSave(row, saveBtn, ok, errorText) {
     savePending = false;
     saveBtn.textContent = 'Save to Sensor';
     updateSaveButtonsDisabled();
@@ -770,7 +781,12 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
         "Saved to sensor. Applied immediately — not verified by a read-back (this firmware doesn't confirm reads). Will be restored automatically from this device's saved settings on every reboot.";
     } else {
       statusLine.classList.add('is-failed');
-      statusLine.textContent =
+      // WR-01 (12-REVIEW iter2): surface the specific rejection reason (e.g.
+      // "a save is already in progress") when one was provided by the
+      // server, mirroring finishAddRemove()'s errorText precedent, instead
+      // of always showing the generic timeout message for a request that
+      // was actually rejected before ever reaching the radar.
+      statusLine.textContent = errorText ||
         "Save failed — the device didn't acknowledge the write in time. Nothing was confirmed applied; this zone's configuration on the device is unchanged. Check the device is online and try again.";
     }
   }
