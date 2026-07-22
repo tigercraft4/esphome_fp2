@@ -727,6 +727,12 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     zone->sensitivity = sensitivity;
     if (zone_type >= 0) {
       zone->set_zone_type((uint8_t) zone_type);
+    } else {
+      // WR-02 (12-06): this reused FP2Zone object may carry a zone_type set
+      // during an earlier add-then-remove cycle this boot. A create call
+      // that omits zone_type (sentinel -1) must not let that stale value
+      // leak into this zone's new life - clear the unset marker explicitly.
+      zone->has_zone_type = false;
     }
     if (zone->presence_sensor != nullptr) {
       zone->presence_sensor->set_internal(false);
@@ -828,6 +834,24 @@ void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
     save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " not found";
     // WR-02 fix (12-REVIEW): a rejected request must leave save_pending()
     // false, not permanently true (CR-01 wedge-avoidance precedent).
+    this->save_batch_in_progress_ = false;
+    return;
+  }
+
+  // WR-03 (12-06): reject deleting a compile-time (YAML-declared) zone -
+  // mirrors add_zone_at_runtime()'s CR-02 guard idiom. zone_id has already
+  // matched an active zones_ entry above, so zone_slot_cache_[zone_id] is
+  // safe to index here; a null entry means this ID was never tracked by
+  // rehydrate_zone_registry_() or this function's own reuse branch, i.e. it
+  // belongs to the compile-time set_zones() path. Without this guard the
+  // deactivation below would "succeed" from the UI's perspective, but the
+  // next boot's set_zones() call resurrects the zone anyway - reporting a
+  // deletion that silently does not persist.
+  if (this->zone_slot_cache_[zone_id] == nullptr) {
+    ESP_LOGW(TAG, "remove_zone_at_runtime: zone_id %u belongs to a compile-time zone", zone_id);
+    save_failed_ = true;
+    save_error_ = std::string("zone_id ") + std::to_string(zone_id) +
+                  " belongs to a compile-time zone and cannot be removed here";
     this->save_batch_in_progress_ = false;
     return;
   }
