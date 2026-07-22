@@ -940,6 +940,14 @@ void FP2Component::save_global_zone_to_sensor(uint8_t sensitivity) {
   enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, sensitivity);
   pending_save_attr_ids_.push_back(AttrId::PRESENCE_DETECT_SENSITIVITY);
 
+  // CR-01 (12-06): mirror the just-saved value into the live member so a
+  // later force_detection_config() (fired independently, e.g. from a
+  // diagnostic action) re-writes THIS value to the radar instead of
+  // silently reverting to whatever was in global_presence_sensitivity_
+  // before this save. Only on the all-valid path - a rejected input above
+  // returns before reaching here and never touches the mirror.
+  this->global_presence_sensitivity_ = sensitivity;
+
   // RUN-02 (09-03): persist to NVS so this survives a host reboot without a
   // reflash. Only reached on the all-valid path (after the enqueue above) -
   // a rejected input never persists.
@@ -1079,6 +1087,28 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
   // reflash. Only reached on the all-valid path (after all enqueues above) -
   // a rejected input never persists.
   save_zone_override_(zone_id, grid, sensitivity, zone_type);
+
+  // WR-01 (12-06): mirror the just-saved grid/sensitivity/zone_type into the
+  // matched in-memory FP2Zone and re-publish its map_sensor, so GET
+  // /api/zones and the map_sensor text sensor reflect this save immediately
+  // instead of showing pre-save data until the next reboot re-hydrates from
+  // NVS. Only on the all-valid path (after the NVS persist above) - every
+  // rejected/early-return branch above returns before reaching here.
+  for (auto *zone : zones_) {
+    if (zone->active && zone->id == zone_id) {
+      zone->grid = grid;
+      zone->sensitivity = sensitivity;
+      if (zone_type >= 0) {
+        zone->set_zone_type((uint8_t) zone_type);
+      } else {
+        zone->has_zone_type = false;
+      }
+      if (zone->map_sensor != nullptr) {
+        zone->map_sensor->publish_state(grid_to_hex_card_format(zone->grid));
+      }
+      break;
+    }
+  }
 }
 
 // WEBUI-02 (11-03): server-side grid lookup for the device-hosted /zones
