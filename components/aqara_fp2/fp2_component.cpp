@@ -718,6 +718,11 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     if (zone->presence_sensor != nullptr) {
       zone->presence_sensor->set_internal(false);
     }
+    // WR-01 fix (12-REVIEW): clear stale motion/debounce state from this
+    // object's prior life (add-then-remove earlier this boot) BEFORE
+    // reactivating - otherwise a leftover motion_active/last_motion_millis
+    // could resurrect a phantom "motion on" state for the zone's new life.
+    zone->reset_motion();
     // CR-01 fix (12-REVIEW iter2): this object is already an entry in
     // zones_ from an earlier add-then-remove cycle this boot session (never
     // erased, only deactivated below) - reactivate in place. Do NOT
@@ -1767,8 +1772,11 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             // Exit/Interference do not.
             if (event_type & 0x0B) {
               uint32_t now = millis();
+              // WR-01 fix (12-REVIEW): require z->active so a stray report
+              // for a removed zone (ACK-pending window) never mutates a
+              // retired FP2Zone's motion state.
               for (auto &z : zones_) {
-                if (z->id == zone_id) {
+                if (z->active && z->id == zone_id) {
                   z->note_motion_event(now);
                   break;
                 }
@@ -1824,8 +1832,11 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             uint8_t state = payload[4];
             ESP_LOGD(TAG, "Zone Presence Report: Zone %d = %s", zone_id, state ? "ON" : "OFF");
 
+            // WR-01 fix (12-REVIEW): require z->active so a stray report for
+            // a removed zone (ACK-pending window) never mutates a retired
+            // FP2Zone's presence state.
             for (auto &z : zones_) {
-                if (z->id == zone_id) {
+                if (z->active && z->id == zone_id) {
                     z->publish_presence(state == 1);
                     break;
                 }
@@ -1849,8 +1860,11 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             uint8_t count = payload[4];
             ESP_LOGD(TAG, "Zone People Count Report: Zone %d = %u", zone_id, count);
 
+            // WR-01 fix (12-REVIEW): require z->active so a stray report for
+            // a removed zone (ACK-pending window) never mutates a retired
+            // FP2Zone's people-count state.
             for (auto &z : zones_) {
-                if (z->id == zone_id) {
+                if (z->active && z->id == zone_id) {
                     z->publish_people_count(count);
                     break;
                 }
