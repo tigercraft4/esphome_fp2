@@ -602,9 +602,16 @@ public:
   // main-loop task; reading its .empty() state directly from the httpd task
   // (zones_web_handler.h's handle_get_status_(), polled every second) races
   // those mutations - the same hazard class CR-01 (iter3) fixed for zones_.
-  // save_batch_in_progress_ is a plain bool set/cleared only at well-defined
-  // batch start/end transition points (see its declaration below), never
-  // read mid-mutation, so it is safe to read cross-task without a lock.
+  // WR-02 fix (12-REVIEW): save_batch_in_progress_ is a plain bool set true
+  // as the FIRST statement of each deferred create/delete/save mutation
+  // (add_zone_at_runtime/remove_zone_at_runtime/save_zone_from_editor/
+  // save_zone_to_sensor), before any validation runs, and cleared false
+  // either on an invalid-input early return or at batch completion/ACK (see
+  // its declaration below) - so save_pending() reads true for the entire
+  // duration a mutation is being processed on the main loop, and this
+  // single-word cross-task read from the httpd status poller never observes
+  // a stale pending:false window mid-mutation. Still safe to read cross-task
+  // without a lock (plain bool, single-word read).
   bool save_pending() { return editor_save_queued_ || save_batch_in_progress_; }
   bool save_ok() { return !save_failed_; }
   // CR-01 fix (12-REVIEW #2): save_error_ is a std::string reassigned

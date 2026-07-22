@@ -624,6 +624,12 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
   // save_pending() would wedge permanently true after the very first
   // create/delete call of any outcome.
   this->editor_save_queued_ = false;
+  // WR-02 fix (12-REVIEW): open the batch for save_pending()'s cross-task
+  // read as the very FIRST statement (paired with the editor_save_queued_
+  // clear above), before any validation runs - otherwise a concurrently
+  // polled GET /api/zones/status could observe a stale pending:false while
+  // this call is already validating/mutating on the main loop.
+  this->save_batch_in_progress_ = true;
   // V5 (Pitfall 3): duplicate-ID guard scans the LIVE zones_ union - covers
   // BOTH compile-time YAML zones and already-runtime-added zones, since they
   // share one 0-31 ID space and one zones_ vector. Never derive this check
@@ -636,6 +642,9 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
       ESP_LOGW(TAG, "add_zone_at_runtime: zone_id %u already in use", zone_id);
       save_failed_ = true;
       save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " already in use";
+      // WR-02 fix (12-REVIEW): a rejected request must leave save_pending()
+      // false, not permanently true (CR-01 wedge-avoidance precedent).
+      this->save_batch_in_progress_ = false;
       return;
     }
   }
@@ -654,6 +663,9 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     ESP_LOGW(TAG, "add_zone_at_runtime: invalid zone_type %d", zone_type);
     save_failed_ = true;
     save_error_ = std::string("invalid zone_type ") + std::to_string(zone_type);
+    // WR-02 fix (12-REVIEW): clear so a rejected request never wedges
+    // save_pending() permanently true.
+    this->save_batch_in_progress_ = false;
     return;
   }
 
@@ -677,6 +689,9 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
       save_failed_ = true;
       save_error_ = std::string("zone_id ") + std::to_string(zone_id) +
                     " belongs to a compile-time zone and cannot be re-created here";
+      // WR-02 fix (12-REVIEW): clear so a rejected request never wedges
+      // save_pending() permanently true.
+      this->save_batch_in_progress_ = false;
       return;
     }
   }
@@ -686,8 +701,6 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
   save_failed_ = false;
   save_error_.clear();
   pending_save_attr_ids_.clear();
-  // CR-01 fix (12-REVIEW #2): open the batch for save_pending()'s cross-task read.
-  save_batch_in_progress_ = true;
 
   // D-04: a newly-created zone defaults to a full 14x14 active grid - it must
   // be immediately functional since grid painting doesn't exist until Phase 13.
@@ -798,6 +811,10 @@ void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
   // must run first, before the not-found rejection below, so a rejected
   // delete call also clears the flag handle_post_delete_ set synchronously.
   this->editor_save_queued_ = false;
+  // WR-02 fix (12-REVIEW): open the batch for save_pending()'s cross-task
+  // read as the very FIRST statement (paired with the editor_save_queued_
+  // clear above), before the not-found rejection below.
+  this->save_batch_in_progress_ = true;
   // CR-01 fix (12-REVIEW iter2): match only an *active* entry - a
   // previously-removed ID's now-inactive FP2Zone* stays in zones_ (see
   // below), so without the active check a double-remove would silently
@@ -809,6 +826,9 @@ void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
     ESP_LOGW(TAG, "remove_zone_at_runtime: zone_id %u not found", zone_id);
     save_failed_ = true;
     save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " not found";
+    // WR-02 fix (12-REVIEW): a rejected request must leave save_pending()
+    // false, not permanently true (CR-01 wedge-avoidance precedent).
+    this->save_batch_in_progress_ = false;
     return;
   }
 
@@ -816,8 +836,6 @@ void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
   save_failed_ = false;
   save_error_.clear();
   pending_save_attr_ids_.clear();
-  // CR-01 fix (12-REVIEW #2): open the batch for save_pending()'s cross-task read.
-  save_batch_in_progress_ = true;
 
   FP2Zone *zone = *it;
   // CR-01 fix (12-REVIEW iter2): deactivate in place FIRST (so the
@@ -924,6 +942,11 @@ static int fp2_hex_nibble_(char c) {
 // value survives a host reboot without a reflash.
 void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_hex,
                                         uint8_t sensitivity, int zone_type) {
+  // WR-02 fix (12-REVIEW): open the batch for save_pending()'s cross-task
+  // read as the very FIRST statement, before check (a) below - covers both
+  // the direct-caller path and the save_zone_from_editor() delegation path
+  // (idempotent with that function's own earlier set).
+  this->save_batch_in_progress_ = true;
   // (a) zone_id must match an actually-compiled zone (Pitfall 2) - a linear
   // search of zones_, NOT a bare 0-31 protocol-range check. zones_ is tiny
   // (0-2 entries in practice), so this is cheap.
@@ -942,6 +965,9 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
     ESP_LOGW(TAG, "save_zone_to_sensor: zone_id %u is not a compiled zone", zone_id);
     save_failed_ = true;
     save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " is not a compiled zone";
+    // WR-02 fix (12-REVIEW): a rejected request must leave save_pending()
+    // false, not permanently true (CR-01 wedge-avoidance precedent).
+    this->save_batch_in_progress_ = false;
     return;
   }
 
@@ -951,6 +977,7 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
     save_failed_ = true;
     save_error_ = std::string("invalid sensitivity ") + std::to_string(sensitivity) +
                   " (must be 1-3)";
+    this->save_batch_in_progress_ = false;
     return;
   }
 
@@ -961,6 +988,7 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
     ESP_LOGW(TAG, "save_zone_to_sensor: invalid zone_type %d", zone_type);
     save_failed_ = true;
     save_error_ = std::string("invalid zone_type ") + std::to_string(zone_type);
+    this->save_batch_in_progress_ = false;
     return;
   }
 
@@ -971,6 +999,7 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
     save_failed_ = true;
     save_error_ = std::string("grid_hex must be exactly 80 hex characters, got ") +
                   std::to_string(grid_hex.size());
+    this->save_batch_in_progress_ = false;
     return;
   }
   GridMap grid{};
@@ -981,19 +1010,19 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
       ESP_LOGW(TAG, "save_zone_to_sensor: grid_hex contains a non-hex character");
       save_failed_ = true;
       save_error_ = "grid_hex contains a non-hex character";
+      this->save_batch_in_progress_ = false;
       return;
     }
     grid[i] = (uint8_t)((hi << 4) | lo);
   }
 
-  // All valid - clear any prior failure state and start a fresh save batch.
+  // All valid - clear any prior failure state. save_batch_in_progress_ was
+  // already opened as this function's first statement (WR-02 fix).
   ESP_LOGI(TAG, "Queueing zone %u save (sensitivity=%u, zone_type=%d)", zone_id, sensitivity,
            zone_type);
   save_failed_ = false;
   save_error_.clear();
   pending_save_attr_ids_.clear();
-  // CR-01 fix (12-REVIEW #2): open the batch for save_pending()'s cross-task read.
-  save_batch_in_progress_ = true;
 
   // 1. ZONE_MAP (0x0114): [ZoneID] [40-byte grid], BLOB2.
   std::vector<uint8_t> payload;
@@ -1043,6 +1072,13 @@ void FP2Component::save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, i
   // loop. There is no gap: save_pending() ORs both fields, and this clear
   // happens immediately before the call that populates the other field.
   this->editor_save_queued_ = false;
+  // WR-02 fix (12-REVIEW): open the batch for save_pending()'s cross-task
+  // read as the very FIRST statement, before the grid-extraction loop below
+  // - that loop window (and the delegation to save_zone_to_sensor()) must
+  // never observe/leave a stale pending:false gap. save_zone_to_sensor()
+  // also sets this as its own first statement (idempotent) since it has
+  // other, direct callers too.
+  this->save_batch_in_progress_ = true;
   std::string grid_hex;
   // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) entries -
   // save_zone_to_sensor()'s own (a) check below already rejects a removed
