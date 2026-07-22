@@ -727,6 +727,12 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     zone->sensitivity = sensitivity;
     if (zone_type >= 0) {
       zone->set_zone_type((uint8_t) zone_type);
+    } else {
+      // WR-02 (12-06): this reused FP2Zone object may carry a zone_type set
+      // during an earlier add-then-remove cycle this boot. A create call
+      // that omits zone_type (sentinel -1) must not let that stale value
+      // leak into this zone's new life - clear the unset marker explicitly.
+      zone->has_zone_type = false;
     }
     if (zone->presence_sensor != nullptr) {
       zone->presence_sensor->set_internal(false);
@@ -832,6 +838,24 @@ void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
     return;
   }
 
+  // WR-03 (12-06): reject deleting a compile-time (YAML-declared) zone -
+  // mirrors add_zone_at_runtime()'s CR-02 guard idiom. zone_id has already
+  // matched an active zones_ entry above, so zone_slot_cache_[zone_id] is
+  // safe to index here; a null entry means this ID was never tracked by
+  // rehydrate_zone_registry_() or this function's own reuse branch, i.e. it
+  // belongs to the compile-time set_zones() path. Without this guard the
+  // deactivation below would "succeed" from the UI's perspective, but the
+  // next boot's set_zones() call resurrects the zone anyway - reporting a
+  // deletion that silently does not persist.
+  if (this->zone_slot_cache_[zone_id] == nullptr) {
+    ESP_LOGW(TAG, "remove_zone_at_runtime: zone_id %u belongs to a compile-time zone", zone_id);
+    save_failed_ = true;
+    save_error_ = std::string("zone_id ") + std::to_string(zone_id) +
+                  " belongs to a compile-time zone and cannot be removed here";
+    this->save_batch_in_progress_ = false;
+    return;
+  }
+
   ESP_LOGI(TAG, "Removing runtime zone %u", zone_id);
   save_failed_ = false;
   save_error_.clear();
@@ -915,6 +939,14 @@ void FP2Component::save_global_zone_to_sensor(uint8_t sensitivity) {
   save_batch_in_progress_ = true;
   enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, sensitivity);
   pending_save_attr_ids_.push_back(AttrId::PRESENCE_DETECT_SENSITIVITY);
+
+  // CR-01 (12-06): mirror the just-saved value into the live member so a
+  // later force_detection_config() (fired independently, e.g. from a
+  // diagnostic action) re-writes THIS value to the radar instead of
+  // silently reverting to whatever was in global_presence_sensitivity_
+  // before this save. Only on the all-valid path - a rejected input above
+  // returns before reaching here and never touches the mirror.
+  this->global_presence_sensitivity_ = sensitivity;
 
   // RUN-02 (09-03): persist to NVS so this survives a host reboot without a
   // reflash. Only reached on the all-valid path (after the enqueue above) -
@@ -1055,6 +1087,28 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
   // reflash. Only reached on the all-valid path (after all enqueues above) -
   // a rejected input never persists.
   save_zone_override_(zone_id, grid, sensitivity, zone_type);
+
+  // WR-01 (12-06): mirror the just-saved grid/sensitivity/zone_type into the
+  // matched in-memory FP2Zone and re-publish its map_sensor, so GET
+  // /api/zones and the map_sensor text sensor reflect this save immediately
+  // instead of showing pre-save data until the next reboot re-hydrates from
+  // NVS. Only on the all-valid path (after the NVS persist above) - every
+  // rejected/early-return branch above returns before reaching here.
+  for (auto *zone : zones_) {
+    if (zone->active && zone->id == zone_id) {
+      zone->grid = grid;
+      zone->sensitivity = sensitivity;
+      if (zone_type >= 0) {
+        zone->set_zone_type((uint8_t) zone_type);
+      } else {
+        zone->has_zone_type = false;
+      }
+      if (zone->map_sensor != nullptr) {
+        zone->map_sensor->publish_state(grid_to_hex_card_format(zone->grid));
+      }
+      break;
+    }
+  }
 }
 
 // WEBUI-02 (11-03): server-side grid lookup for the device-hosted /zones
