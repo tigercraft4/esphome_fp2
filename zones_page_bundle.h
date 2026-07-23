@@ -312,6 +312,218 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     return div.innerHTML;
   }
 
+  // === FP2Codec START (ported verbatim from card.js lines 25-121) ===
+  // Byte-exact port of parse_ascii_grid/grid_to_hex_string
+  // (components/aqara_fp2/__init__.py). Pure functions only — no DOM
+  // dependency, drops into this closure unchanged (13-PATTERNS.md "FP2Codec
+  // port"). gridToHex ALWAYS emits the 80-char/40-byte canonical write
+  // format; hexToGrid accepts BOTH the 56-char (14-row card/display format,
+  // GET /api/zones' hex fields) and 80-char (write) input, and never throws
+  // on malformed input (WR-02/WR-03 never-throw idiom, Pitfall 4 in
+  // 13-RESEARCH.md: never round-trip a GET /api/zones grid string straight
+  // into a POST /api/zones/save body without going through hexToGrid/
+  // gridToHex first).
+  var FP2Codec = (function () {
+    var ROWS_OUT = 20; // protocol grid rows (only first 14 are ever populated; offset_row=0)
+    var OFFSET_ROW = 0;
+    var OFFSET_COL = 2;
+
+    function emptyGrid() {
+      var g = [];
+      for (var r = 0; r < GRID_SIZE; r++) g.push(Array(GRID_SIZE).fill(0));
+      return g;
+    }
+
+    function asciiToGrid(ascii) {
+      var lines = (ascii || '')
+        .trim()
+        .split('\n')
+        .map(function (l) { return l.replace(/ /g, ''); })
+        .filter(function (l) { return l.length > 0; });
+      if (lines.length !== GRID_SIZE) {
+        console.warn('[FP2 Zones] asciiToGrid: expected ' + GRID_SIZE + ' rows, got ' + lines.length + ', using empty grid');
+        return emptyGrid();
+      }
+      var grid = [];
+      for (var r = 0; r < GRID_SIZE; r++) {
+        if (lines[r].length !== GRID_SIZE) {
+          console.warn('[FP2 Zones] asciiToGrid: row ' + (r + 1) + ' must have ' + GRID_SIZE + ' chars, got ' + lines[r].length + ', using empty grid');
+          return emptyGrid();
+        }
+        grid.push(Array.from(lines[r]).map(function (ch) { return (ch === 'x' || ch === 'X') ? 1 : 0; }));
+      }
+      return grid;
+    }
+
+    function gridToAscii(grid) {
+      return grid.map(function (row) {
+        return row.map(function (v) { return v ? 'X' : '.'; }).join('');
+      }).join('\n');
+    }
+
+    function gridToHex(grid) {
+      // grid: 14x14 array of 0/1 -> full 40-byte / 80-hex-char protocol blob.
+      var bytes = new Uint8Array(ROWS_OUT * 2);
+      for (var r = 0; r < GRID_SIZE; r++) {
+        var outR = r + OFFSET_ROW;
+        var rowVal = 0;
+        for (var c = 0; c < GRID_SIZE; c++) {
+          if (grid[r][c]) {
+            var outC = c + OFFSET_COL;
+            rowVal |= 1 << (15 - outC); // MSB-first: col 0 -> bit 15
+          }
+        }
+        bytes[outR * 2] = (rowVal >> 8) & 0xff; // high byte (Big-Endian)
+        bytes[outR * 2 + 1] = rowVal & 0xff; // low byte
+      }
+      return Array.from(bytes).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+    }
+
+    function hexToGrid(hex) {
+      // Accepts either the 80-char (20-row) canonical protocol blob or the
+      // live GET /api/zones response's 56-char (14-row) card format.
+      // Defensive-parse-never-throw: malformed input warns and returns a
+      // 14x14 zero grid, it never throws. A legitimately-absent optional
+      // grid (interference/exit/edge unconfigured) is the normal empty-grid
+      // case — return silently to avoid a console.warn on every render
+      // cycle (WR-03). Reserve warnings for genuinely present-but-malformed
+      // non-empty input.
+      if (hex == null || hex === '') {
+        return emptyGrid();
+      }
+      if (typeof hex !== 'string' || hex.length % 4 !== 0) {
+        console.warn('[FP2 Zones] hexToGrid: invalid/malformed hex (length ' + (typeof hex === 'string' ? hex.length : typeof hex) + '), using empty grid');
+        return emptyGrid();
+      }
+      // Validate the hex alphabet before parsing — parseInt stops at the
+      // first non-hex char and would silently mis-decode a corrupt-but-
+      // correct-length payload (WR-02).
+      if (!/^[0-9a-fA-F]*$/.test(hex)) {
+        console.warn('[FP2 Zones] hexToGrid: non-hex characters in input, using empty grid');
+        return emptyGrid();
+      }
+      if (hex.length !== 56 && hex.length !== 80) {
+        console.warn('[FP2 Zones] hexToGrid: unexpected hex length ' + hex.length + ' (expected 56 or 80), decoding first ' + GRID_SIZE + ' rows anyway');
+      }
+      var availableRows = hex.length / 4;
+      var rowsToRead = Math.min(GRID_SIZE, availableRows);
+      var grid = emptyGrid();
+      for (var r = 0; r < rowsToRead; r++) {
+        var rowVal = parseInt(hex.substr(r * 4, 4), 16);
+        for (var c = 0; c < GRID_SIZE; c++) {
+          var outC = c + OFFSET_COL;
+          grid[r][c] = (rowVal >> (15 - outC)) & 1;
+        }
+      }
+      return grid;
+    }
+
+    return { asciiToGrid: asciiToGrid, gridToAscii: gridToAscii, gridToHex: gridToHex, hexToGrid: hexToGrid };
+  })();
+  // === FP2Codec END ===
+
+  // === FP2Geometry START (ported from card.js lines 133-166, 216-251) ===
+  // Pure mirror/cell-walk math. Single-check-point discipline (13-CONTEXT.md,
+  // 13-PATTERNS.md "FP2Geometry port"): applyGridMirror is THE one place
+  // leftRightReverse is checked for grid data; invertColumnMirror is its own
+  // inverse for a display column; mirrorGrid MUST NOT mutate its input (it
+  // may alias editorState). walkCellsBetween is the Bresenham/DDA drag-paint
+  // interpolation walk (never-throw on non-finite input, returns [endpoint]
+  // on a null anchor).
+  var FP2Geometry = (function () {
+    function mirrorColumn(col) {
+      // Discrete grid column mirror: col -> 13-col. Its own exact inverse.
+      return GRID_SIZE - 1 - col;
+    }
+
+    function mirrorGrid(grid) {
+      // Returns a NEW 14x14 array with each row reversed. MUST NOT mutate
+      // the input: the input may alias editorState, so always slice()
+      // before reverse().
+      if (!Array.isArray(grid)) {
+        console.warn('[FP2 Zones] mirrorGrid: expected an array grid, returning input unchanged');
+        return grid;
+      }
+      return grid.map(function (row) { return Array.isArray(row) ? row.slice().reverse() : row; });
+    }
+
+    function applyGridMirror(grid, reverse) {
+      // The single place leftRightReverse is checked for grid data.
+      return reverse ? mirrorGrid(grid) : grid;
+    }
+
+    function mirrorGridX(gridX) {
+      // Continuous 0..14 mirror for the live target overlay (not a discrete
+      // column index).
+      return GRID_SIZE - gridX;
+    }
+
+    function applyGridXMirror(gridX, reverse) {
+      // The single place leftRightReverse is checked for the live target
+      // overlay's continuous X coordinate.
+      return reverse ? mirrorGridX(gridX) : gridX;
+    }
+
+    function invertColumnMirror(displayCol, reverse) {
+      // Exact inverse used by the pointer/click path: the column mirror is
+      // its own inverse.
+      return reverse ? mirrorColumn(displayCol) : displayCol;
+    }
+
+    function walkCellsBetween(a, b) {
+      // Integer Bresenham/DDA walk returning every {x,y} cell from a to b
+      // inclusive, 8-connected (no diagonal gaps) — drag-paint interpolation.
+      if (a == null) {
+        return [b];
+      }
+      if (b == null) {
+        return [a];
+      }
+      if (!isFinite(a.x) || !isFinite(a.y) || !isFinite(b.x) || !isFinite(b.y)) {
+        console.warn('[FP2 Zones] walkCellsBetween: non-finite coordinate, returning endpoint only');
+        return [b];
+      }
+      var x0 = Math.round(a.x);
+      var y0 = Math.round(a.y);
+      var x1 = Math.round(b.x);
+      var y1 = Math.round(b.y);
+      var cells = [];
+      var x = x0;
+      var y = y0;
+      var dx = Math.abs(x1 - x0);
+      var dy = -Math.abs(y1 - y0);
+      var sx = x0 < x1 ? 1 : -1;
+      var sy = y0 < y1 ? 1 : -1;
+      var err = dx + dy;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        cells.push({ x: x, y: y });
+        if (x === x1 && y === y1) break;
+        var e2 = 2 * err;
+        if (e2 >= dy) {
+          err += dy;
+          x += sx;
+        }
+        if (e2 <= dx) {
+          err += dx;
+          y += sy;
+        }
+      }
+      return cells;
+    }
+
+    return {
+      mirrorColumn: mirrorColumn,
+      mirrorGrid: mirrorGrid,
+      applyGridMirror: applyGridMirror,
+      mirrorGridX: mirrorGridX,
+      applyGridXMirror: applyGridXMirror,
+      invertColumnMirror: invertColumnMirror,
+      walkCellsBetween: walkCellsBetween
+    };
+  })();
+  // === FP2Geometry END ===
+
   // --- Live-overlay grid: static lines drawn once; target dots per frame ---
 
   function buildGridLines() {
@@ -351,12 +563,6 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       return { gridX: ((-rawX + 400) / 800.0) * 14.0, gridY: (rawY / 800.0) * 14.0 };
     }
     return { gridX: rawX * 0.01, gridY: rawY * 0.01 };
-  }
-
-  // Ported from card.js's FP2Geometry.applyGridXMirror (lines ~161-164) —
-  // the single place left_right_reverse is checked for the live overlay.
-  function applyGridXMirror(gridX, reverse) {
-    return reverse ? (GRID_SIZE - gridX) : gridX;
   }
 
   // Ported verbatim from card.js:2017-2062 (decodeTargetsBase64).
@@ -407,7 +613,10 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       var tgt = targets[i];
       if (!tgt.active) continue;
       var xy = targetToGridXY(tgt.x, tgt.y, mountingPosition);
-      var gx = applyGridXMirror(xy.gridX, leftRightReverse);
+      // Refactored to route through the single ported FP2Geometry mirror
+      // check point (13-03-PLAN.md Task 1) — same behavior as the prior
+      // local applyGridXMirror duplicate, just one call target now.
+      var gx = FP2Geometry.applyGridXMirror(xy.gridX, leftRightReverse);
       var gy = xy.gridY;
       if (gx < 0 || gx > GRID_SIZE || gy < 0 || gy > GRID_SIZE) continue;
       var dot = document.createElementNS(SVG_NS, 'circle');
