@@ -246,6 +246,28 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     min-height: 44px;
     cursor: pointer;
   }
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+  .legend-entry {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .legend-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .global-zone-field {
+    margin-top: 16px;
+  }
   .add-zone-bar {
     display: flex;
     align-items: center;
@@ -284,7 +306,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   </header>
 
   <section class="panel" id="live-view-panel">
-    <h2 class="panel-title">Live View</h2>
+    <h2 class="panel-title">Painting</h2>
     <div class="layer-toolbar">
       <div class="field-group">
         <label class="field-label" for="layer-select">Layer</label>
@@ -297,6 +319,21 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     </div>
     <div id="live-grid-container">
       <svg id="live-grid" viewBox="0 0 14 14" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+    <div class="legend-row">
+      <span class="legend-entry"><span class="legend-swatch" style="background: rgba(37, 99, 235, 0.35);"></span>Zone</span>
+      <span class="legend-entry"><span class="legend-swatch" style="background: rgba(220, 38, 38, 0.30);"></span>Interference</span>
+      <span class="legend-entry"><span class="legend-swatch" style="background: rgba(22, 163, 74, 0.75);"></span>Exit</span>
+      <span class="legend-entry"><span class="legend-swatch" style="background: rgba(91, 100, 112, 0.35);"></span>Edge</span>
+    </div>
+    <div class="global-zone-field field-group">
+      <label class="field-label" for="global-zone-select">Global Zone</label>
+      <select id="global-zone-select">
+        <option value="">-- not set --</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
     </div>
   </section>
 
@@ -341,6 +378,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   var layerSelectEl = document.getElementById('layer-select');
   var paintModeToggleEl = document.getElementById('paint-mode-toggle');
   var clearLayerBtnEl = document.getElementById('clear-layer-btn');
+  var globalZoneSelectEl = document.getElementById('global-zone-select');
 
   // Pitfall 1 / RESEARCH A1: the firmware's save-confirmation state
   // (save_pending()/save_ok()/save_error()) is one shared, global set of
@@ -1017,6 +1055,19 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     redrawLayerByKey(selectedLayer);
   });
   // === Layer toolbar END ===
+
+  // === Global Zone field (13-04-PLAN.md Task 2, WEBUI-04/D-01) ===
+  //
+  // Ported from card.js's .global-zone-field, copy unchanged ("-- not set --"
+  // / "Low" / "Medium" / "High"). Stored in this closure var so a future
+  // Export (Plan 05) can emit it and Import can reset it — this plan only
+  // wires the field's own state, not export/import.
+  var globalZoneSensitivity = null;
+  globalZoneSelectEl.addEventListener('change', function () {
+    globalZoneSensitivity = globalZoneSelectEl.value === '' ? null : globalZoneSelectEl.value;
+    console.log('[FP2 Zones] Global Zone presence_sensitivity changed: ' + globalZoneSensitivity);
+  });
+  // === Global Zone field END ===
 
   // Ported from card.js's FP2Geometry.targetToGridXY (lines ~173-188): corner
   // mounts use the verified 7m x 7m transform; wall mount reuses card.js's
