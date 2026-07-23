@@ -734,6 +734,133 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   }
   // === Paint layers END ===
 
+  // === Pointer-driven paint/erase (13-03-PLAN.md Task 3, WEBUI-04/D-01) ===
+  //
+  // Plan 04 owns the actual Layer-select/Paint-Erase-toggle UI; paintMode is
+  // the shared closure var it will flip between 'paint'/'erase'. Default
+  // 'paint' (alongside Task 2's default selectedLayer = 'interference') so
+  // this task's pointer logic is testable in isolation before that UI
+  // exists.
+  var paintMode = 'paint';
+
+  var painting = false;
+  var activePointerId = null;
+  var lastStrokeCell = null; // canonical (write-space) {x,y}; null between strokes
+
+  // Maps a layerKey to the one owning sparse-redraw function (Task 2). All
+  // zones share the single zones-layer group, so any 'zone:<id>' key routes
+  // to the same redrawZonesLayer(). Also refreshes the selected-layer
+  // outline when the mutated layer IS the currently-selected one — still a
+  // single targeted group, not a full-canvas rebuild, and keeps the outline
+  // from going stale mid-stroke.
+  function redrawLayerByKey(layerKey) {
+    if (layerKey === 'interference') redrawInterferenceLayer();
+    else if (layerKey === 'exit') redrawExitLayer();
+    else if (layerKey === 'edge') redrawEdgeLayer();
+    else if (layerKey.indexOf('zone:') === 0) redrawZonesLayer();
+    if (layerKey === selectedLayer) redrawSelectedOutline();
+  }
+
+  // SVG-native pointer-to-cell math (13-RESEARCH.md Pattern 2): viewBox="0 0
+  // 14 14" means 1 SVG user unit == 1 grid cell, so no cellSize/minX/minY
+  // bookkeeping is needed at all (unlike card.js's canvas renderParams).
+  // Never throws — returns null on an unlaid-out element (null CTM) or an
+  // out-of-bounds pick (ASVS V5 bounds guard).
+  function clientToGridCell(svg, clientX, clientY) {
+    var pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    var ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    var loc = pt.matrixTransform(ctm.inverse());
+    var x = Math.floor(loc.x);
+    var y = Math.floor(loc.y);
+    if (x < 0 || x > 13 || y < 0 || y > 13) return null;
+    return { x: x, y: y };
+  }
+
+  // ASVS V5 / T-13-03: bounds-guard AGAIN at the mutation site (defense in
+  // depth, ported from card.js's paintCell guard) — never trust a computed
+  // cell index without a range check, even one already checked upstream by
+  // clientToGridCell.
+  function paintCell(layerKey, x, y, erase) {
+    if (x < 0 || x > 13 || y < 0 || y > 13) return;
+    var grid = editorState[layerKey];
+    if (!Array.isArray(grid) || !Array.isArray(grid[y])) return;
+    grid[y][x] = erase ? 0 : 1;
+    redrawLayerByKey(layerKey);
+  }
+
+  // Ported behavior from card.js's canvasEventToGridCell/paintCell (not its
+  // canvas-pixel math, per 13-RESEARCH.md Pattern 2): pick the display-space
+  // cell, invert the column mirror to get the canonical write-space x (the
+  // single mirror check point on the write side), then interpolate every
+  // intermediate cell since the last sample via FP2Geometry.walkCellsBetween
+  // so a fast drag never skips cells. Erase is live per-cell (matches
+  // card.js): the Paint/Erase toggle OR a held Shift, checked at the time of
+  // each sample, not locked in at pointerdown.
+  function strokeToClientPoint(clientX, clientY, shiftKey) {
+    var displayCell = clientToGridCell(liveGridEl, clientX, clientY);
+    if (!displayCell) return;
+    var canonicalCell = {
+      x: FP2Geometry.invertColumnMirror(displayCell.x, leftRightReverse),
+      y: displayCell.y
+    };
+    var erase = paintMode === 'erase' || shiftKey === true;
+    FP2Geometry.walkCellsBetween(lastStrokeCell, canonicalCell).forEach(function (cell) {
+      paintCell(selectedLayer, cell.x, cell.y, erase);
+    });
+    lastStrokeCell = canonicalCell;
+  }
+
+  function endStroke(e) {
+    if (e.pointerId !== activePointerId) return;
+    painting = false;
+    activePointerId = null;
+    lastStrokeCell = null;
+    try {
+      liveGridEl.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      // Not captured (e.g. pointercancel, or a synthetic/test event) — safe
+      // to ignore (never-throw discipline).
+    }
+  }
+
+  // Pointer Events (not separate mouse/touch handlers) so the same code
+  // path drives mouse, touch, and pen (13-UI-SPEC.md — this page is
+  // reachable from a phone on the LAN). card.js's right-click-to-erase is
+  // deliberately NOT ported here — no touch equivalent exists and the
+  // Paint/Erase toggle already covers the same need (13-UI-SPEC.md).
+  liveGridEl.addEventListener('pointerdown', function (e) {
+    // WR-03 precedent (card.js): ignore a second concurrent pointer (e.g.
+    // an accidental extra finger during a touch drag) while one is already
+    // painting, so a stray pointermove from either pointer can't interpolate
+    // a spurious stroke between two unrelated touch points.
+    if (painting) return;
+    try {
+      // Keeps pointermove targeted at #live-grid even if the drag leaves
+      // its bounds. Guarded — a synthetic/test event or an already-released
+      // pointerId can throw (never-throw discipline).
+      liveGridEl.setPointerCapture(e.pointerId);
+    } catch (err) {
+      console.warn('[FP2 Zones] setPointerCapture failed (pointerId ' + e.pointerId + '):', err);
+    }
+    activePointerId = e.pointerId;
+    painting = true;
+    lastStrokeCell = null;
+    strokeToClientPoint(e.clientX, e.clientY, e.shiftKey);
+  });
+
+  liveGridEl.addEventListener('pointermove', function (e) {
+    if (!painting || e.pointerId !== activePointerId) return;
+    strokeToClientPoint(e.clientX, e.clientY, e.shiftKey);
+  });
+
+  liveGridEl.addEventListener('pointerup', endStroke);
+  liveGridEl.addEventListener('pointercancel', endStroke);
+  liveGridEl.addEventListener('pointerleave', endStroke);
+  // === Pointer-driven paint/erase END ===
+
   // Ported from card.js's FP2Geometry.targetToGridXY (lines ~173-188): corner
   // mounts use the verified 7m x 7m transform; wall mount reuses card.js's
   // own not-yet-verified placeholder (rawX/rawY * 0.01) rather than inventing
