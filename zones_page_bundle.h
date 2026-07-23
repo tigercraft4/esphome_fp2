@@ -312,6 +312,218 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     return div.innerHTML;
   }
 
+  // === FP2Codec START (ported verbatim from card.js lines 25-121) ===
+  // Byte-exact port of parse_ascii_grid/grid_to_hex_string
+  // (components/aqara_fp2/__init__.py). Pure functions only — no DOM
+  // dependency, drops into this closure unchanged (13-PATTERNS.md "FP2Codec
+  // port"). gridToHex ALWAYS emits the 80-char/40-byte canonical write
+  // format; hexToGrid accepts BOTH the 56-char (14-row card/display format,
+  // GET /api/zones' hex fields) and 80-char (write) input, and never throws
+  // on malformed input (WR-02/WR-03 never-throw idiom, Pitfall 4 in
+  // 13-RESEARCH.md: never round-trip a GET /api/zones grid string straight
+  // into a POST /api/zones/save body without going through hexToGrid/
+  // gridToHex first).
+  var FP2Codec = (function () {
+    var ROWS_OUT = 20; // protocol grid rows (only first 14 are ever populated; offset_row=0)
+    var OFFSET_ROW = 0;
+    var OFFSET_COL = 2;
+
+    function emptyGrid() {
+      var g = [];
+      for (var r = 0; r < GRID_SIZE; r++) g.push(Array(GRID_SIZE).fill(0));
+      return g;
+    }
+
+    function asciiToGrid(ascii) {
+      var lines = (ascii || '')
+        .trim()
+        .split('\n')
+        .map(function (l) { return l.replace(/ /g, ''); })
+        .filter(function (l) { return l.length > 0; });
+      if (lines.length !== GRID_SIZE) {
+        console.warn('[FP2 Zones] asciiToGrid: expected ' + GRID_SIZE + ' rows, got ' + lines.length + ', using empty grid');
+        return emptyGrid();
+      }
+      var grid = [];
+      for (var r = 0; r < GRID_SIZE; r++) {
+        if (lines[r].length !== GRID_SIZE) {
+          console.warn('[FP2 Zones] asciiToGrid: row ' + (r + 1) + ' must have ' + GRID_SIZE + ' chars, got ' + lines[r].length + ', using empty grid');
+          return emptyGrid();
+        }
+        grid.push(Array.from(lines[r]).map(function (ch) { return (ch === 'x' || ch === 'X') ? 1 : 0; }));
+      }
+      return grid;
+    }
+
+    function gridToAscii(grid) {
+      return grid.map(function (row) {
+        return row.map(function (v) { return v ? 'X' : '.'; }).join('');
+      }).join('\n');
+    }
+
+    function gridToHex(grid) {
+      // grid: 14x14 array of 0/1 -> full 40-byte / 80-hex-char protocol blob.
+      var bytes = new Uint8Array(ROWS_OUT * 2);
+      for (var r = 0; r < GRID_SIZE; r++) {
+        var outR = r + OFFSET_ROW;
+        var rowVal = 0;
+        for (var c = 0; c < GRID_SIZE; c++) {
+          if (grid[r][c]) {
+            var outC = c + OFFSET_COL;
+            rowVal |= 1 << (15 - outC); // MSB-first: col 0 -> bit 15
+          }
+        }
+        bytes[outR * 2] = (rowVal >> 8) & 0xff; // high byte (Big-Endian)
+        bytes[outR * 2 + 1] = rowVal & 0xff; // low byte
+      }
+      return Array.from(bytes).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+    }
+
+    function hexToGrid(hex) {
+      // Accepts either the 80-char (20-row) canonical protocol blob or the
+      // live GET /api/zones response's 56-char (14-row) card format.
+      // Defensive-parse-never-throw: malformed input warns and returns a
+      // 14x14 zero grid, it never throws. A legitimately-absent optional
+      // grid (interference/exit/edge unconfigured) is the normal empty-grid
+      // case — return silently to avoid a console.warn on every render
+      // cycle (WR-03). Reserve warnings for genuinely present-but-malformed
+      // non-empty input.
+      if (hex == null || hex === '') {
+        return emptyGrid();
+      }
+      if (typeof hex !== 'string' || hex.length % 4 !== 0) {
+        console.warn('[FP2 Zones] hexToGrid: invalid/malformed hex (length ' + (typeof hex === 'string' ? hex.length : typeof hex) + '), using empty grid');
+        return emptyGrid();
+      }
+      // Validate the hex alphabet before parsing — parseInt stops at the
+      // first non-hex char and would silently mis-decode a corrupt-but-
+      // correct-length payload (WR-02).
+      if (!/^[0-9a-fA-F]*$/.test(hex)) {
+        console.warn('[FP2 Zones] hexToGrid: non-hex characters in input, using empty grid');
+        return emptyGrid();
+      }
+      if (hex.length !== 56 && hex.length !== 80) {
+        console.warn('[FP2 Zones] hexToGrid: unexpected hex length ' + hex.length + ' (expected 56 or 80), decoding first ' + GRID_SIZE + ' rows anyway');
+      }
+      var availableRows = hex.length / 4;
+      var rowsToRead = Math.min(GRID_SIZE, availableRows);
+      var grid = emptyGrid();
+      for (var r = 0; r < rowsToRead; r++) {
+        var rowVal = parseInt(hex.substr(r * 4, 4), 16);
+        for (var c = 0; c < GRID_SIZE; c++) {
+          var outC = c + OFFSET_COL;
+          grid[r][c] = (rowVal >> (15 - outC)) & 1;
+        }
+      }
+      return grid;
+    }
+
+    return { asciiToGrid: asciiToGrid, gridToAscii: gridToAscii, gridToHex: gridToHex, hexToGrid: hexToGrid };
+  })();
+  // === FP2Codec END ===
+
+  // === FP2Geometry START (ported from card.js lines 133-166, 216-251) ===
+  // Pure mirror/cell-walk math. Single-check-point discipline (13-CONTEXT.md,
+  // 13-PATTERNS.md "FP2Geometry port"): applyGridMirror is THE one place
+  // leftRightReverse is checked for grid data; invertColumnMirror is its own
+  // inverse for a display column; mirrorGrid MUST NOT mutate its input (it
+  // may alias editorState). walkCellsBetween is the Bresenham/DDA drag-paint
+  // interpolation walk (never-throw on non-finite input, returns [endpoint]
+  // on a null anchor).
+  var FP2Geometry = (function () {
+    function mirrorColumn(col) {
+      // Discrete grid column mirror: col -> 13-col. Its own exact inverse.
+      return GRID_SIZE - 1 - col;
+    }
+
+    function mirrorGrid(grid) {
+      // Returns a NEW 14x14 array with each row reversed. MUST NOT mutate
+      // the input: the input may alias editorState, so always slice()
+      // before reverse().
+      if (!Array.isArray(grid)) {
+        console.warn('[FP2 Zones] mirrorGrid: expected an array grid, returning input unchanged');
+        return grid;
+      }
+      return grid.map(function (row) { return Array.isArray(row) ? row.slice().reverse() : row; });
+    }
+
+    function applyGridMirror(grid, reverse) {
+      // The single place leftRightReverse is checked for grid data.
+      return reverse ? mirrorGrid(grid) : grid;
+    }
+
+    function mirrorGridX(gridX) {
+      // Continuous 0..14 mirror for the live target overlay (not a discrete
+      // column index).
+      return GRID_SIZE - gridX;
+    }
+
+    function applyGridXMirror(gridX, reverse) {
+      // The single place leftRightReverse is checked for the live target
+      // overlay's continuous X coordinate.
+      return reverse ? mirrorGridX(gridX) : gridX;
+    }
+
+    function invertColumnMirror(displayCol, reverse) {
+      // Exact inverse used by the pointer/click path: the column mirror is
+      // its own inverse.
+      return reverse ? mirrorColumn(displayCol) : displayCol;
+    }
+
+    function walkCellsBetween(a, b) {
+      // Integer Bresenham/DDA walk returning every {x,y} cell from a to b
+      // inclusive, 8-connected (no diagonal gaps) — drag-paint interpolation.
+      if (a == null) {
+        return [b];
+      }
+      if (b == null) {
+        return [a];
+      }
+      if (!isFinite(a.x) || !isFinite(a.y) || !isFinite(b.x) || !isFinite(b.y)) {
+        console.warn('[FP2 Zones] walkCellsBetween: non-finite coordinate, returning endpoint only');
+        return [b];
+      }
+      var x0 = Math.round(a.x);
+      var y0 = Math.round(a.y);
+      var x1 = Math.round(b.x);
+      var y1 = Math.round(b.y);
+      var cells = [];
+      var x = x0;
+      var y = y0;
+      var dx = Math.abs(x1 - x0);
+      var dy = -Math.abs(y1 - y0);
+      var sx = x0 < x1 ? 1 : -1;
+      var sy = y0 < y1 ? 1 : -1;
+      var err = dx + dy;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        cells.push({ x: x, y: y });
+        if (x === x1 && y === y1) break;
+        var e2 = 2 * err;
+        if (e2 >= dy) {
+          err += dy;
+          x += sx;
+        }
+        if (e2 <= dx) {
+          err += dx;
+          y += sy;
+        }
+      }
+      return cells;
+    }
+
+    return {
+      mirrorColumn: mirrorColumn,
+      mirrorGrid: mirrorGrid,
+      applyGridMirror: applyGridMirror,
+      mirrorGridX: mirrorGridX,
+      applyGridXMirror: applyGridXMirror,
+      invertColumnMirror: invertColumnMirror,
+      walkCellsBetween: walkCellsBetween
+    };
+  })();
+  // === FP2Geometry END ===
+
   // --- Live-overlay grid: static lines drawn once; target dots per frame ---
 
   function buildGridLines() {
@@ -341,6 +553,314 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   targetDotsGroup.setAttribute('id', 'target-dots');
   liveGridEl.appendChild(targetDotsGroup);
 
+  // === Paint layers (13-03-PLAN.md Task 2, WEBUI-04/D-01) ===
+  //
+  // editorState: client-side only, lives in this closure. Keyed
+  // 'interference' / 'exit' / 'edge' / 'zone:<id>', mirroring card.js's
+  // shape (13-RESEARCH.md Pattern 1). Seeded from the SAME GET /api/zones
+  // response loadZones() already awaits below — no new endpoint.
+  var editorState = {};
+
+  // Plan 04 owns the Layer toolbar UI (<select> + Paint/Erase toggle) that
+  // will read/write this closure var; default to the first fixed layer so
+  // the selected-layer outline and Task 3's paint routing are testable in
+  // isolation before that UI exists.
+  var selectedLayer = 'interference';
+
+  // Five new SVG groups, created ONCE at load and inserted via
+  // insertBefore(group, targetDotsGroup) so each lands immediately before
+  // targetDotsGroup — repeating this against the same reference node builds
+  // the exact documented back-to-front stacking order without ever
+  // reordering targetDotsGroup itself (13-PATTERNS.md "SVG z-order and
+  // sparse redraw"): grid lines -> edge -> interference -> exit -> zones ->
+  // selected-layer outline -> targets (always on top, unchanged).
+  function makeLayerGroup(id) {
+    var g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('id', id);
+    liveGridEl.insertBefore(g, targetDotsGroup);
+    return g;
+  }
+  var edgeLayerGroup = makeLayerGroup('edge-layer');
+  var interferenceLayerGroup = makeLayerGroup('interference-layer');
+  var exitLayerGroup = makeLayerGroup('exit-layer');
+  var zonesLayerGroup = makeLayerGroup('zones-layer');
+  var selectedOutlineGroup = makeLayerGroup('selected-layer-outline');
+
+  // Painting Layer Colors, 13-UI-SPEC.md Color table — the only place these
+  // literal values are declared.
+  var ZONE_FILL = 'rgba(37, 99, 235, 0.35)';
+  var ZONE_BORDER = 'rgba(37, 99, 235, 0.7)';
+  var INTERFERENCE_FILL = 'rgba(220, 38, 38, 0.30)';
+  var EXIT_STROKE = 'rgba(22, 163, 74, 0.75)';
+  var EDGE_FILL = 'rgba(91, 100, 112, 0.35)';
+  var EDGE_HATCH_STROKE = 'rgba(26, 29, 33, 0.3)';
+  var SELECTED_OUTLINE_STROKE = '#2563EB';
+
+  function clearGroup(group) {
+    while (group.firstChild) {
+      group.removeChild(group.firstChild);
+    }
+  }
+
+  // Walks a canonical (write-space) grid, mirrors it through the single
+  // FP2Geometry.applyGridMirror check point into display space, and invokes
+  // cellDrawFn(group, x, y) for every active display-space cell. Grid may
+  // be null/undefined (an as-yet-unseeded layer) — no-op, not an error.
+  function drawCellsInto(group, grid, cellDrawFn) {
+    if (!grid) return;
+    var displayGrid = FP2Geometry.applyGridMirror(grid, leftRightReverse);
+    for (var y = 0; y < GRID_SIZE; y++) {
+      var row = displayGrid[y];
+      if (!row) continue;
+      for (var x = 0; x < GRID_SIZE; x++) {
+        if (row[x]) cellDrawFn(group, x, y);
+      }
+    }
+  }
+
+  function makeFillCellDrawer(fill, border) {
+    return function (group, x, y) {
+      var rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', x);
+      rect.setAttribute('y', y);
+      rect.setAttribute('width', 1);
+      rect.setAttribute('height', 1);
+      rect.setAttribute('fill', fill);
+      if (border) {
+        rect.setAttribute('stroke', border);
+        rect.setAttribute('stroke-width', '2');
+        // Keeps the border a crisp N-CSS-pixel line regardless of the SVG's
+        // viewBox-to-rendered-size scale (the grid is fluid-width per
+        // 13-UI-SPEC.md, unlike the fixed-pixel <canvas> card.js drew on).
+        rect.setAttribute('vector-effect', 'non-scaling-stroke');
+      } else {
+        rect.setAttribute('stroke', 'none');
+      }
+      group.appendChild(rect);
+    };
+  }
+
+  function makeStrokeCellDrawer(stroke, strokeWidth, dash) {
+    return function (group, x, y) {
+      var rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', x);
+      rect.setAttribute('y', y);
+      rect.setAttribute('width', 1);
+      rect.setAttribute('height', 1);
+      rect.setAttribute('fill', 'none');
+      rect.setAttribute('stroke', stroke);
+      rect.setAttribute('stroke-width', strokeWidth);
+      rect.setAttribute('vector-effect', 'non-scaling-stroke');
+      if (dash) rect.setAttribute('stroke-dasharray', dash);
+      group.appendChild(rect);
+    };
+  }
+
+  function makeCrosshatchCellDrawer(fill, hatchStroke) {
+    var fillDrawer = makeFillCellDrawer(fill, null);
+    return function (group, x, y) {
+      fillDrawer(group, x, y);
+      var l1 = document.createElementNS(SVG_NS, 'line');
+      l1.setAttribute('x1', x);
+      l1.setAttribute('y1', y);
+      l1.setAttribute('x2', x + 1);
+      l1.setAttribute('y2', y + 1);
+      l1.setAttribute('stroke', hatchStroke);
+      l1.setAttribute('stroke-width', '1');
+      l1.setAttribute('vector-effect', 'non-scaling-stroke');
+      group.appendChild(l1);
+      var l2 = document.createElementNS(SVG_NS, 'line');
+      l2.setAttribute('x1', x + 1);
+      l2.setAttribute('y1', y);
+      l2.setAttribute('x2', x);
+      l2.setAttribute('y2', y + 1);
+      l2.setAttribute('stroke', hatchStroke);
+      l2.setAttribute('stroke-width', '1');
+      l2.setAttribute('vector-effect', 'non-scaling-stroke');
+      group.appendChild(l2);
+    };
+  }
+
+  // Per-layer sparse redraw (13-PATTERNS.md Pattern 4): each function
+  // clears and rebuilds only its own group. Called on initial load
+  // (loadZones()) and, later, on a paint/erase mutation of that specific
+  // layer (Task 3) — never on the ~1/s SSE target_update tick, which only
+  // touches targetDotsGroup via renderTargets() above.
+  function redrawEdgeLayer() {
+    clearGroup(edgeLayerGroup);
+    drawCellsInto(edgeLayerGroup, editorState.edge, makeCrosshatchCellDrawer(EDGE_FILL, EDGE_HATCH_STROKE));
+  }
+
+  function redrawInterferenceLayer() {
+    clearGroup(interferenceLayerGroup);
+    drawCellsInto(interferenceLayerGroup, editorState.interference, makeFillCellDrawer(INTERFERENCE_FILL, null));
+  }
+
+  function redrawExitLayer() {
+    clearGroup(exitLayerGroup);
+    drawCellsInto(exitLayerGroup, editorState.exit, makeStrokeCellDrawer(EXIT_STROKE, '3'));
+  }
+
+  // All zones render simultaneously into the SAME shared group (parity with
+  // card.js showing every zone at once, not just the selected one) — this
+  // one group is rebuilt in full whenever ANY zone's grid changes, which is
+  // still "sparse" relative to the SSE tick it must never run on.
+  function redrawZonesLayer() {
+    clearGroup(zonesLayerGroup);
+    var drawer = makeFillCellDrawer(ZONE_FILL, ZONE_BORDER);
+    for (var key in editorState) {
+      if (!Object.prototype.hasOwnProperty.call(editorState, key)) continue;
+      if (key.indexOf('zone:') !== 0) continue;
+      drawCellsInto(zonesLayerGroup, editorState[key], drawer);
+    }
+  }
+
+  // Dashed accent outline around the currently-selected layer's populated
+  // cells only (editing indicator, ported from card.js's
+  // drawSelectedLayerOutline, dash pattern [4,2] verbatim).
+  function redrawSelectedOutline() {
+    clearGroup(selectedOutlineGroup);
+    var grid = selectedLayer ? editorState[selectedLayer] : null;
+    if (!grid) return;
+    drawCellsInto(selectedOutlineGroup, grid, makeStrokeCellDrawer(SELECTED_OUTLINE_STROKE, '2', '4,2'));
+  }
+
+  function redrawAllLayers() {
+    redrawEdgeLayer();
+    redrawInterferenceLayer();
+    redrawExitLayer();
+    redrawZonesLayer();
+    redrawSelectedOutline();
+  }
+  // === Paint layers END ===
+
+  // === Pointer-driven paint/erase (13-03-PLAN.md Task 3, WEBUI-04/D-01) ===
+  //
+  // Plan 04 owns the actual Layer-select/Paint-Erase-toggle UI; paintMode is
+  // the shared closure var it will flip between 'paint'/'erase'. Default
+  // 'paint' (alongside Task 2's default selectedLayer = 'interference') so
+  // this task's pointer logic is testable in isolation before that UI
+  // exists.
+  var paintMode = 'paint';
+
+  var painting = false;
+  var activePointerId = null;
+  var lastStrokeCell = null; // canonical (write-space) {x,y}; null between strokes
+
+  // Maps a layerKey to the one owning sparse-redraw function (Task 2). All
+  // zones share the single zones-layer group, so any 'zone:<id>' key routes
+  // to the same redrawZonesLayer(). Also refreshes the selected-layer
+  // outline when the mutated layer IS the currently-selected one — still a
+  // single targeted group, not a full-canvas rebuild, and keeps the outline
+  // from going stale mid-stroke.
+  function redrawLayerByKey(layerKey) {
+    if (layerKey === 'interference') redrawInterferenceLayer();
+    else if (layerKey === 'exit') redrawExitLayer();
+    else if (layerKey === 'edge') redrawEdgeLayer();
+    else if (layerKey.indexOf('zone:') === 0) redrawZonesLayer();
+    if (layerKey === selectedLayer) redrawSelectedOutline();
+  }
+
+  // SVG-native pointer-to-cell math (13-RESEARCH.md Pattern 2): viewBox="0 0
+  // 14 14" means 1 SVG user unit == 1 grid cell, so no cellSize/minX/minY
+  // bookkeeping is needed at all (unlike card.js's canvas renderParams).
+  // Never throws — returns null on an unlaid-out element (null CTM) or an
+  // out-of-bounds pick (ASVS V5 bounds guard).
+  function clientToGridCell(svg, clientX, clientY) {
+    var pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    var ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    var loc = pt.matrixTransform(ctm.inverse());
+    var x = Math.floor(loc.x);
+    var y = Math.floor(loc.y);
+    if (x < 0 || x > 13 || y < 0 || y > 13) return null;
+    return { x: x, y: y };
+  }
+
+  // ASVS V5 / T-13-03: bounds-guard AGAIN at the mutation site (defense in
+  // depth, ported from card.js's paintCell guard) — never trust a computed
+  // cell index without a range check, even one already checked upstream by
+  // clientToGridCell.
+  function paintCell(layerKey, x, y, erase) {
+    if (x < 0 || x > 13 || y < 0 || y > 13) return;
+    var grid = editorState[layerKey];
+    if (!Array.isArray(grid) || !Array.isArray(grid[y])) return;
+    grid[y][x] = erase ? 0 : 1;
+    redrawLayerByKey(layerKey);
+  }
+
+  // Ported behavior from card.js's canvasEventToGridCell/paintCell (not its
+  // canvas-pixel math, per 13-RESEARCH.md Pattern 2): pick the display-space
+  // cell, invert the column mirror to get the canonical write-space x (the
+  // single mirror check point on the write side), then interpolate every
+  // intermediate cell since the last sample via FP2Geometry.walkCellsBetween
+  // so a fast drag never skips cells. Erase is live per-cell (matches
+  // card.js): the Paint/Erase toggle OR a held Shift, checked at the time of
+  // each sample, not locked in at pointerdown.
+  function strokeToClientPoint(clientX, clientY, shiftKey) {
+    var displayCell = clientToGridCell(liveGridEl, clientX, clientY);
+    if (!displayCell) return;
+    var canonicalCell = {
+      x: FP2Geometry.invertColumnMirror(displayCell.x, leftRightReverse),
+      y: displayCell.y
+    };
+    var erase = paintMode === 'erase' || shiftKey === true;
+    FP2Geometry.walkCellsBetween(lastStrokeCell, canonicalCell).forEach(function (cell) {
+      paintCell(selectedLayer, cell.x, cell.y, erase);
+    });
+    lastStrokeCell = canonicalCell;
+  }
+
+  function endStroke(e) {
+    if (e.pointerId !== activePointerId) return;
+    painting = false;
+    activePointerId = null;
+    lastStrokeCell = null;
+    try {
+      liveGridEl.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      // Not captured (e.g. pointercancel, or a synthetic/test event) — safe
+      // to ignore (never-throw discipline).
+    }
+  }
+
+  // Pointer Events (not separate mouse/touch handlers) so the same code
+  // path drives mouse, touch, and pen (13-UI-SPEC.md — this page is
+  // reachable from a phone on the LAN). card.js's right-click-to-erase is
+  // deliberately NOT ported here — no touch equivalent exists and the
+  // Paint/Erase toggle already covers the same need (13-UI-SPEC.md).
+  liveGridEl.addEventListener('pointerdown', function (e) {
+    // WR-03 precedent (card.js): ignore a second concurrent pointer (e.g.
+    // an accidental extra finger during a touch drag) while one is already
+    // painting, so a stray pointermove from either pointer can't interpolate
+    // a spurious stroke between two unrelated touch points.
+    if (painting) return;
+    try {
+      // Keeps pointermove targeted at #live-grid even if the drag leaves
+      // its bounds. Guarded — a synthetic/test event or an already-released
+      // pointerId can throw (never-throw discipline).
+      liveGridEl.setPointerCapture(e.pointerId);
+    } catch (err) {
+      console.warn('[FP2 Zones] setPointerCapture failed (pointerId ' + e.pointerId + '):', err);
+    }
+    activePointerId = e.pointerId;
+    painting = true;
+    lastStrokeCell = null;
+    strokeToClientPoint(e.clientX, e.clientY, e.shiftKey);
+  });
+
+  liveGridEl.addEventListener('pointermove', function (e) {
+    if (!painting || e.pointerId !== activePointerId) return;
+    strokeToClientPoint(e.clientX, e.clientY, e.shiftKey);
+  });
+
+  liveGridEl.addEventListener('pointerup', endStroke);
+  liveGridEl.addEventListener('pointercancel', endStroke);
+  liveGridEl.addEventListener('pointerleave', endStroke);
+  // === Pointer-driven paint/erase END ===
+
   // Ported from card.js's FP2Geometry.targetToGridXY (lines ~173-188): corner
   // mounts use the verified 7m x 7m transform; wall mount reuses card.js's
   // own not-yet-verified placeholder (rawX/rawY * 0.01) rather than inventing
@@ -351,12 +871,6 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       return { gridX: ((-rawX + 400) / 800.0) * 14.0, gridY: (rawY / 800.0) * 14.0 };
     }
     return { gridX: rawX * 0.01, gridY: rawY * 0.01 };
-  }
-
-  // Ported from card.js's FP2Geometry.applyGridXMirror (lines ~161-164) —
-  // the single place left_right_reverse is checked for the live overlay.
-  function applyGridXMirror(gridX, reverse) {
-    return reverse ? (GRID_SIZE - gridX) : gridX;
   }
 
   // Ported verbatim from card.js:2017-2062 (decodeTargetsBase64).
@@ -407,7 +921,10 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       var tgt = targets[i];
       if (!tgt.active) continue;
       var xy = targetToGridXY(tgt.x, tgt.y, mountingPosition);
-      var gx = applyGridXMirror(xy.gridX, leftRightReverse);
+      // Refactored to route through the single ported FP2Geometry mirror
+      // check point (13-03-PLAN.md Task 1) — same behavior as the prior
+      // local applyGridXMirror duplicate, just one call target now.
+      var gx = FP2Geometry.applyGridXMirror(xy.gridX, leftRightReverse);
       var gy = xy.gridY;
       if (gx < 0 || gx > GRID_SIZE || gy < 0 || gy > GRID_SIZE) continue;
       var dot = document.createElementNS(SVG_NS, 'circle');
@@ -572,7 +1089,30 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       .then(function (data) {
         mountingPosition = data.mounting_position || 'wall';
         leftRightReverse = data.left_right_reverse === true;
+
+        // Seed editorState from this SAME response (13-RESEARCH.md Pattern
+        // 1) — no new endpoint. FP2Codec.hexToGrid already handles the
+        // 56-char card-format hex these fields use, and never-throws on an
+        // absent/malformed grid (partial-state backstop, T-13-07).
+        editorState.interference = FP2Codec.hexToGrid(data.interference_grid);
+        editorState.exit = FP2Codec.hexToGrid(data.exit_grid);
+        editorState.edge = FP2Codec.hexToGrid(data.edge_grid);
+        // Drop zone:<id> keys for zones no longer present (loadZones() is
+        // also called after a Remove/Add — WEBUI-05 finishAddRemove() below
+        // — and will be reused by a future Import refresh) so a removed
+        // zone's painted layer never lingers in editorState or the shared
+        // zones-layer group.
+        for (var staleKey in editorState) {
+          if (Object.prototype.hasOwnProperty.call(editorState, staleKey) && staleKey.indexOf('zone:') === 0) {
+            delete editorState[staleKey];
+          }
+        }
+        (data.zones || []).forEach(function (z) {
+          editorState['zone:' + z.id] = FP2Codec.hexToGrid(z.grid);
+        });
+
         renderZoneList(data.zones || []);
+        redrawAllLayers();
       })
       .catch(function () {
         showLoadError();
