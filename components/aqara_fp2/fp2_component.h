@@ -574,7 +574,13 @@ public:
   // grid over the wire (D-01), so there is nothing to trust or re-validate
   // from the client beyond zone_id/sensitivity/zone_type, which
   // save_zone_to_sensor() already fully validates (V5).
-  void save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type);
+  // WEBUI-04 (13-01): trailing optional grid_hex param - when the caller
+  // supplies a non-empty client-painted grid (already canonical 80-char
+  // hex), it is used directly instead of the server-side zones_ lookup
+  // below. Default lives only here (header declaration); every existing
+  // 3-arg call site is source-compatible and unchanged.
+  void save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type,
+                              const std::string &grid_hex = "");
   // ZONEMGMT-01/02 (12-01): public surface for the live zone registry -
   // definitions land in Plan 02. Declared here now so the class surface is
   // stable for this plan's rehydrate_zone_registry_() and Plan 02's HTTP
