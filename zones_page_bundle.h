@@ -1905,9 +1905,32 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
     var sensitivitySelect = row.querySelector('.sensitivity-select');
     var zoneTypeSelect = row.querySelector('.zone-type-select');
+    // Pitfall 4 (13-RESEARCH.md): grid_hex sent to /api/zones/save MUST be
+    // the 80-char canonical write format (FP2Codec.gridToHex) - NEVER the
+    // 56-char display format GET /api/zones returns, and NEVER a raw
+    // round-trip of that GET response straight into this POST body. The
+    // grid always comes from editorState (built once via FP2Codec.hexToGrid
+    // at seed/import time, then mutated only by the paint/erase handlers),
+    // never re-read from the wire here. A zone whose layer the user never
+    // painted this session still saves correctly: editorState was already
+    // seeded from the device on load, so gridToHex of that unpainted grid
+    // still produces a valid 80-char string identical to what the device
+    // already has.
+    var zoneGrid = editorState['zone:' + zoneId];
+    if (!Array.isArray(zoneGrid)) {
+      // Defensive backstop only - should be unreachable, since loadZones()
+      // always seeds editorState['zone:<id>'] for every rendered row before
+      // its Save button can be clicked. Reuses FP2Codec.hexToGrid('')
+      // (already the single source of truth for building an empty grid)
+      // rather than a second empty-grid literal.
+      console.warn('[FP2 Zones] handleSaveClick: no editorState grid for zone ' + zoneId + ', saving an empty grid');
+      zoneGrid = FP2Codec.hexToGrid('');
+    }
+    var gridHex = FP2Codec.gridToHex(zoneGrid);
     var body = 'zone_id=' + encodeURIComponent(zoneId) +
       '&sensitivity=' + encodeURIComponent(sensitivitySelect.value) +
-      '&zone_type=' + encodeURIComponent(zoneTypeSelect.value);
+      '&zone_type=' + encodeURIComponent(zoneTypeSelect.value) +
+      '&grid_hex=' + encodeURIComponent(gridHex);
 
     fetch('/api/zones/save', {
       method: 'POST',
