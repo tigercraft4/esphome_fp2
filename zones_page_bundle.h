@@ -1376,8 +1376,121 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   }
 
   exportYamlBtnEl.addEventListener('click', handleExportClick);
-  // === Export YAML / Import from Device END (Task 1 - Export only; Import
-  // wiring lands in Task 2 below the Zone List section) ===
+
+  var IMPORT_CONFIRM_COPY = "Import will overwrite the global grids and every existing device zone's grid/sensitivity with the device's current configuration. zone_type, motion_timeout, and Global Zone sensitivity will be reset (the device can't report these). Locally-added zones are kept, and zones already created on this device are included. Continue?";
+  var IMPORT_FAILURE_COPY = "Import failed — could not fetch the device's current configuration. Try again.";
+
+  function setImportStatus(text, isFailed) {
+    importStatusEl.classList.toggle('is-failed', !!isFailed);
+    importStatusEl.textContent = text || '';
+  }
+
+  // Merges a fresh GET /api/zones response INTO editorState (never a
+  // wholesale replace of unrelated state) - mirrors card.js's
+  // mergeImportedMapConfig(). Per-row deep copy: FP2Codec.hexToGrid always
+  // builds brand-new row arrays (never aliases editorState), so no
+  // additional .slice() step is needed here, unlike card.js's explicit
+  // `.map(function (row) { return row.slice(); })` (which exists there
+  // because gatherEntityData() can return aliased rows - this bundle's
+  // hexToGrid never does).
+  //
+  // CRITICAL (Pitfall 2 / D-05 / D-07, 13-RESEARCH.md): GET /api/zones DOES
+  // report zone.zone_type per zone whenever the device has one set, but
+  // this merge DELIBERATELY DISCARDS it on every zone/import to honor the
+  // locked D-05/D-07 decision - this is intentional, NOT an oversight. Do
+  // NOT "fix" this by reading z.zone_type into the rendered rows below. The
+  // same applies to motion_timeout (no live source at all, same as v1.0)
+  // and Global Zone sensitivity (also has no live source). The reset is
+  // surfaced to the user via the exact inline Import-success copy in
+  // handleImportClick() below, so the UI never silently claims to
+  // round-trip a field it actually discards (13-05-PLAN.md prohibition).
+  function mergeImportedMapConfig(data) {
+    mountingPosition = data.mounting_position || mountingPosition;
+    leftRightReverse = data.left_right_reverse === true;
+
+    editorState.interference = FP2Codec.hexToGrid(data.interference_grid);
+    editorState.exit = FP2Codec.hexToGrid(data.exit_grid);
+    editorState.edge = FP2Codec.hexToGrid(data.edge_grid);
+
+    var deviceZones = Array.isArray(data.zones) ? data.zones : [];
+
+    // Orphan deletion: drop every zone:<id> key not present in the freshly-
+    // imported list (a zone-count DECREASE since the last load). The
+    // 'zone:new:' guard preserves any locally-added-but-not-yet-saved key
+    // by construction (this bundle never actually creates one - Add Zone
+    // always POSTs immediately - but the guard costs nothing and matches
+    // card.js's Pitfall 1 discipline exactly).
+    var deviceZoneKeys = {};
+    deviceZones.forEach(function (z) { deviceZoneKeys['zone:' + z.id] = true; });
+    Object.keys(editorState).forEach(function (key) {
+      if (key.indexOf('zone:') === 0 && key.indexOf('zone:new:') !== 0 && !deviceZoneKeys[key]) {
+        delete editorState[key];
+      }
+    });
+
+    deviceZones.forEach(function (z) {
+      editorState['zone:' + z.id] = FP2Codec.hexToGrid(z.grid);
+    });
+
+    // Reset zone_type/motion_timeout/Global Zone on EVERY import (Pitfall
+    // 2/D-05/D-07 - see function header comment above). Build a rendering
+    // copy of the zones array with zone_type stripped so renderZoneRow()
+    // (which defaults an absent/non-number zone_type to 0/"none") shows the
+    // reset state, never the device's real reported value. sensitivity IS
+    // recoverable and is passed through unchanged - only zone_type is
+    // deliberately discarded.
+    var resetZonesForRender = deviceZones.map(function (z) {
+      return { id: z.id, sensitivity: z.sensitivity, presence_sensor: z.presence_sensor };
+    });
+    renderZoneList(resetZonesForRender);
+    redrawAllLayers();
+    populateLayerSelect(resetZonesForRender);
+
+    globalZoneSensitivity = null;
+    globalZoneSelectEl.value = '';
+
+    return deviceZones.length;
+  }
+
+  // Confirm -> await fetch('/api/zones') (SAME endpoint the page-load seed
+  // and the Zone List panel already use - NO new endpoint) -> merge ->
+  // inline success/failure copy, strictly in that order. A cancelled
+  // confirm is an unconditional early return BEFORE any side effect
+  // (mirrors handleExportClick()'s guard-then-act shape, extended to the
+  // async case). A fetch failure leaves editorState untouched entirely -
+  // the merge only ever runs after a successful fetch.
+  function handleImportClick() {
+    if (!window.confirm(IMPORT_CONFIRM_COPY)) {
+      return;
+    }
+
+    importDeviceBtnEl.disabled = true;
+    importDeviceBtnEl.textContent = 'Importing…';
+    setImportStatus('');
+
+    fetch('/api/zones')
+      .then(function (resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(function (data) {
+        var importedCount = mergeImportedMapConfig(data);
+        importDeviceBtnEl.disabled = false;
+        importDeviceBtnEl.textContent = 'Import from Device';
+        setImportStatus(
+          'Imported ' + importedCount + " zone(s) from the device. zone_type, motion_timeout, and Global Zone sensitivity can't be read from the device and were reset — re-set them if needed before exporting.",
+          false
+        );
+      })
+      .catch(function () {
+        importDeviceBtnEl.disabled = false;
+        importDeviceBtnEl.textContent = 'Import from Device';
+        setImportStatus(IMPORT_FAILURE_COPY, true);
+      });
+  }
+
+  importDeviceBtnEl.addEventListener('click', handleImportClick);
+  // === Export YAML / Import from Device END ===
 
   // Ported from card.js's FP2Geometry.targetToGridXY (lines ~173-188): corner
   // mounts use the verified 7m x 7m transform; wall mount reuses card.js's
