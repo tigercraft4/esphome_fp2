@@ -287,6 +287,72 @@ sensor:
     address: 0x44
     update_interval: 30s
 
+  # ============================================================================
+  # TEMPORARY (Phase 13 SC3 soak instrumentation, D-10 lifecycle) - START
+  # Added for the Roadmap SC3 multi-hour RAM soak (executed on real hardware in
+  # Plan 13-06). Raw ESP-IDF heap-caps calls, NOT ESPHome's built-in debug:
+  # min_free/fragmentation sensor keys - those require an ESPHome version the
+  # pinned esphome>=2025.12.4 release predates (Phase 10 Pitfall 1, still
+  # applicable). Read-only telemetry only - no control logic depends on these.
+  # Remove this entire block (these 3 sensors + the matching interval: entry
+  # below) once the operator has recorded the go/no-go soak verdict; do NOT
+  # remove before then (see .planning/phases/10-architecture-validation-spike/
+  # 10-SOAK-VERDICT.md for the removal-timing precedent this follows).
+  # ============================================================================
+  - platform: template
+    name: "Soak Free Heap"
+    id: soak_free_heap
+    entity_category: diagnostic
+    unit_of_measurement: "B"
+    icon: "mdi:memory"
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      return (float) heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+
+  - platform: template
+    name: "Soak Min Free Heap"
+    id: soak_min_free_heap
+    entity_category: diagnostic
+    unit_of_measurement: "B"
+    icon: "mdi:memory"
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      return (float) heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+
+  - platform: template
+    name: "Soak Fragmentation"
+    id: soak_fragmentation
+    entity_category: diagnostic
+    unit_of_measurement: "%"
+    icon: "mdi:memory"
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: |-
+      size_t free_size = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+      if (free_size == 0) {
+        return 0.0f;
+      }
+      size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+      return 100.0f - (100.0f * (float) largest_block / (float) free_size);
+  # TEMPORARY (Phase 13 SC3 soak instrumentation, D-10 lifecycle) - END sensors
+  # ============================================================================
+
+# TEMPORARY (Phase 13 SC3 soak instrumentation, D-10 lifecycle): 30s greppable
+# log dump ("soak_heap" tag) for scripts/soak_summary.sh's soft-signal parsing
+# (declining free heap / rising fragmentation trend over the run), mirroring
+# Phase 10's spike_soak pattern (git show ec0f661:fp2-sala.yaml). Independent
+# of the logger: level so it survives even if it's raised above INFO for the
+# soak. Remove alongside the 3 sensors above once the verdict is recorded.
+interval:
+  - interval: 30s
+    then:
+      - lambda: |-
+          ESP_LOGI("soak_heap", "free=%.0f min_free=%.0f frag=%.1f",
+                   id(soak_free_heap).state, id(soak_min_free_heap).state,
+                   id(soak_fragmentation).state);
+
 binary_sensor:
   - platform: gpio
     pin:
