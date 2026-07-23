@@ -553,6 +553,187 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   targetDotsGroup.setAttribute('id', 'target-dots');
   liveGridEl.appendChild(targetDotsGroup);
 
+  // === Paint layers (13-03-PLAN.md Task 2, WEBUI-04/D-01) ===
+  //
+  // editorState: client-side only, lives in this closure. Keyed
+  // 'interference' / 'exit' / 'edge' / 'zone:<id>', mirroring card.js's
+  // shape (13-RESEARCH.md Pattern 1). Seeded from the SAME GET /api/zones
+  // response loadZones() already awaits below — no new endpoint.
+  var editorState = {};
+
+  // Plan 04 owns the Layer toolbar UI (<select> + Paint/Erase toggle) that
+  // will read/write this closure var; default to the first fixed layer so
+  // the selected-layer outline and Task 3's paint routing are testable in
+  // isolation before that UI exists.
+  var selectedLayer = 'interference';
+
+  // Five new SVG groups, created ONCE at load and inserted via
+  // insertBefore(group, targetDotsGroup) so each lands immediately before
+  // targetDotsGroup — repeating this against the same reference node builds
+  // the exact documented back-to-front stacking order without ever
+  // reordering targetDotsGroup itself (13-PATTERNS.md "SVG z-order and
+  // sparse redraw"): grid lines -> edge -> interference -> exit -> zones ->
+  // selected-layer outline -> targets (always on top, unchanged).
+  function makeLayerGroup(id) {
+    var g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('id', id);
+    liveGridEl.insertBefore(g, targetDotsGroup);
+    return g;
+  }
+  var edgeLayerGroup = makeLayerGroup('edge-layer');
+  var interferenceLayerGroup = makeLayerGroup('interference-layer');
+  var exitLayerGroup = makeLayerGroup('exit-layer');
+  var zonesLayerGroup = makeLayerGroup('zones-layer');
+  var selectedOutlineGroup = makeLayerGroup('selected-layer-outline');
+
+  // Painting Layer Colors, 13-UI-SPEC.md Color table — the only place these
+  // literal values are declared.
+  var ZONE_FILL = 'rgba(37, 99, 235, 0.35)';
+  var ZONE_BORDER = 'rgba(37, 99, 235, 0.7)';
+  var INTERFERENCE_FILL = 'rgba(220, 38, 38, 0.30)';
+  var EXIT_STROKE = 'rgba(22, 163, 74, 0.75)';
+  var EDGE_FILL = 'rgba(91, 100, 112, 0.35)';
+  var EDGE_HATCH_STROKE = 'rgba(26, 29, 33, 0.3)';
+  var SELECTED_OUTLINE_STROKE = '#2563EB';
+
+  function clearGroup(group) {
+    while (group.firstChild) {
+      group.removeChild(group.firstChild);
+    }
+  }
+
+  // Walks a canonical (write-space) grid, mirrors it through the single
+  // FP2Geometry.applyGridMirror check point into display space, and invokes
+  // cellDrawFn(group, x, y) for every active display-space cell. Grid may
+  // be null/undefined (an as-yet-unseeded layer) — no-op, not an error.
+  function drawCellsInto(group, grid, cellDrawFn) {
+    if (!grid) return;
+    var displayGrid = FP2Geometry.applyGridMirror(grid, leftRightReverse);
+    for (var y = 0; y < GRID_SIZE; y++) {
+      var row = displayGrid[y];
+      if (!row) continue;
+      for (var x = 0; x < GRID_SIZE; x++) {
+        if (row[x]) cellDrawFn(group, x, y);
+      }
+    }
+  }
+
+  function makeFillCellDrawer(fill, border) {
+    return function (group, x, y) {
+      var rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', x);
+      rect.setAttribute('y', y);
+      rect.setAttribute('width', 1);
+      rect.setAttribute('height', 1);
+      rect.setAttribute('fill', fill);
+      if (border) {
+        rect.setAttribute('stroke', border);
+        rect.setAttribute('stroke-width', '2');
+        // Keeps the border a crisp N-CSS-pixel line regardless of the SVG's
+        // viewBox-to-rendered-size scale (the grid is fluid-width per
+        // 13-UI-SPEC.md, unlike the fixed-pixel <canvas> card.js drew on).
+        rect.setAttribute('vector-effect', 'non-scaling-stroke');
+      } else {
+        rect.setAttribute('stroke', 'none');
+      }
+      group.appendChild(rect);
+    };
+  }
+
+  function makeStrokeCellDrawer(stroke, strokeWidth, dash) {
+    return function (group, x, y) {
+      var rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', x);
+      rect.setAttribute('y', y);
+      rect.setAttribute('width', 1);
+      rect.setAttribute('height', 1);
+      rect.setAttribute('fill', 'none');
+      rect.setAttribute('stroke', stroke);
+      rect.setAttribute('stroke-width', strokeWidth);
+      rect.setAttribute('vector-effect', 'non-scaling-stroke');
+      if (dash) rect.setAttribute('stroke-dasharray', dash);
+      group.appendChild(rect);
+    };
+  }
+
+  function makeCrosshatchCellDrawer(fill, hatchStroke) {
+    var fillDrawer = makeFillCellDrawer(fill, null);
+    return function (group, x, y) {
+      fillDrawer(group, x, y);
+      var l1 = document.createElementNS(SVG_NS, 'line');
+      l1.setAttribute('x1', x);
+      l1.setAttribute('y1', y);
+      l1.setAttribute('x2', x + 1);
+      l1.setAttribute('y2', y + 1);
+      l1.setAttribute('stroke', hatchStroke);
+      l1.setAttribute('stroke-width', '1');
+      l1.setAttribute('vector-effect', 'non-scaling-stroke');
+      group.appendChild(l1);
+      var l2 = document.createElementNS(SVG_NS, 'line');
+      l2.setAttribute('x1', x + 1);
+      l2.setAttribute('y1', y);
+      l2.setAttribute('x2', x);
+      l2.setAttribute('y2', y + 1);
+      l2.setAttribute('stroke', hatchStroke);
+      l2.setAttribute('stroke-width', '1');
+      l2.setAttribute('vector-effect', 'non-scaling-stroke');
+      group.appendChild(l2);
+    };
+  }
+
+  // Per-layer sparse redraw (13-PATTERNS.md Pattern 4): each function
+  // clears and rebuilds only its own group. Called on initial load
+  // (loadZones()) and, later, on a paint/erase mutation of that specific
+  // layer (Task 3) — never on the ~1/s SSE target_update tick, which only
+  // touches targetDotsGroup via renderTargets() above.
+  function redrawEdgeLayer() {
+    clearGroup(edgeLayerGroup);
+    drawCellsInto(edgeLayerGroup, editorState.edge, makeCrosshatchCellDrawer(EDGE_FILL, EDGE_HATCH_STROKE));
+  }
+
+  function redrawInterferenceLayer() {
+    clearGroup(interferenceLayerGroup);
+    drawCellsInto(interferenceLayerGroup, editorState.interference, makeFillCellDrawer(INTERFERENCE_FILL, null));
+  }
+
+  function redrawExitLayer() {
+    clearGroup(exitLayerGroup);
+    drawCellsInto(exitLayerGroup, editorState.exit, makeStrokeCellDrawer(EXIT_STROKE, '3'));
+  }
+
+  // All zones render simultaneously into the SAME shared group (parity with
+  // card.js showing every zone at once, not just the selected one) — this
+  // one group is rebuilt in full whenever ANY zone's grid changes, which is
+  // still "sparse" relative to the SSE tick it must never run on.
+  function redrawZonesLayer() {
+    clearGroup(zonesLayerGroup);
+    var drawer = makeFillCellDrawer(ZONE_FILL, ZONE_BORDER);
+    for (var key in editorState) {
+      if (!Object.prototype.hasOwnProperty.call(editorState, key)) continue;
+      if (key.indexOf('zone:') !== 0) continue;
+      drawCellsInto(zonesLayerGroup, editorState[key], drawer);
+    }
+  }
+
+  // Dashed accent outline around the currently-selected layer's populated
+  // cells only (editing indicator, ported from card.js's
+  // drawSelectedLayerOutline, dash pattern [4,2] verbatim).
+  function redrawSelectedOutline() {
+    clearGroup(selectedOutlineGroup);
+    var grid = selectedLayer ? editorState[selectedLayer] : null;
+    if (!grid) return;
+    drawCellsInto(selectedOutlineGroup, grid, makeStrokeCellDrawer(SELECTED_OUTLINE_STROKE, '2', '4,2'));
+  }
+
+  function redrawAllLayers() {
+    redrawEdgeLayer();
+    redrawInterferenceLayer();
+    redrawExitLayer();
+    redrawZonesLayer();
+    redrawSelectedOutline();
+  }
+  // === Paint layers END ===
+
   // Ported from card.js's FP2Geometry.targetToGridXY (lines ~173-188): corner
   // mounts use the verified 7m x 7m transform; wall mount reuses card.js's
   // own not-yet-verified placeholder (rawX/rawY * 0.01) rather than inventing
@@ -781,7 +962,30 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       .then(function (data) {
         mountingPosition = data.mounting_position || 'wall';
         leftRightReverse = data.left_right_reverse === true;
+
+        // Seed editorState from this SAME response (13-RESEARCH.md Pattern
+        // 1) — no new endpoint. FP2Codec.hexToGrid already handles the
+        // 56-char card-format hex these fields use, and never-throws on an
+        // absent/malformed grid (partial-state backstop, T-13-07).
+        editorState.interference = FP2Codec.hexToGrid(data.interference_grid);
+        editorState.exit = FP2Codec.hexToGrid(data.exit_grid);
+        editorState.edge = FP2Codec.hexToGrid(data.edge_grid);
+        // Drop zone:<id> keys for zones no longer present (loadZones() is
+        // also called after a Remove/Add — WEBUI-05 finishAddRemove() below
+        // — and will be reused by a future Import refresh) so a removed
+        // zone's painted layer never lingers in editorState or the shared
+        // zones-layer group.
+        for (var staleKey in editorState) {
+          if (Object.prototype.hasOwnProperty.call(editorState, staleKey) && staleKey.indexOf('zone:') === 0) {
+            delete editorState[staleKey];
+          }
+        }
+        (data.zones || []).forEach(function (z) {
+          editorState['zone:' + z.id] = FP2Codec.hexToGrid(z.grid);
+        });
+
         renderZoneList(data.zones || []);
+        redrawAllLayers();
       })
       .catch(function () {
         showLoadError();
