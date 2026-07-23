@@ -292,6 +292,31 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     padding-bottom: 16px;
     border-bottom: 1px solid #D8DCE1;
   }
+  .export-import-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .export-textarea {
+    width: 100%;
+    min-height: 160px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.4;
+    padding: 8px;
+    border: 1px solid #D8DCE1;
+    border-radius: 4px;
+    background: #F1F3F5;
+    color: #1A1D21;
+    resize: vertical;
+    margin-bottom: 8px;
+  }
+  .export-caption {
+    margin-bottom: 8px;
+  }
   @media (max-width: 480px) {
     body { padding: 8px; }
     .header-bar, .panel { padding: 16px; }
@@ -352,6 +377,26 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     </div>
   </section>
 
+  <!-- Export / Import bar (13-05-PLAN.md, WEBUI-04): page-level actions, not
+       per-zone, same placement as card.js's single global toolbar. No new
+       panel-title heading is introduced here (13-UI-SPEC.md Typography: "no
+       new heading-level text this phase beyond" the Painting rename) - this
+       reuses the .panel container's visual styling only. Both buttons start
+       disabled and are enabled once loadZones() first resolves successfully
+       (13-UI-SPEC.md UI Considerations: "Export and Import buttons stay
+       disabled until the first successful load so neither can act on
+       stale/absent data"). -->
+  <section class="panel" id="export-import-panel">
+    <div class="export-import-bar">
+      <button type="button" id="export-yaml-btn" class="save-btn" disabled>Export YAML</button>
+      <button type="button" id="import-device-btn" class="save-btn" disabled>Import from Device</button>
+    </div>
+    <textarea id="export-textarea" class="export-textarea" readonly style="display:none;"></textarea>
+    <div id="export-caption" class="field-label export-caption" style="display:none;">Paste below your existing aqara_fp2: configuration</div>
+    <div id="export-status" class="status-line"></div>
+    <div id="import-status" class="status-line"></div>
+  </section>
+
 <script>
 (function () {
   'use strict';
@@ -365,6 +410,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   // Mirrors SENSITIVITY_INT_TO_STRING_JS (card.js ~line 305): 1/2/3 are the
   // protocol's raw sensitivity ints, sent to save_zone_to_sensor() as-is.
   var SENSITIVITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High' };
+  // Export-only: maps the same raw ints to the lowercase enum strings
+  // CONFIG_SCHEMA's SENSITIVITY_LEVELS actually expects in YAML
+  // (components/aqara_fp2/__init__.py) - distinct from SENSITIVITY_LABELS
+  // above, which is Title Case for on-screen display only.
+  var SENSITIVITY_INT_TO_STRING = { 1: 'low', 2: 'medium', 3: 'high' };
   var GRID_SIZE = 14;
   var SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -379,6 +429,12 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   var paintModeToggleEl = document.getElementById('paint-mode-toggle');
   var clearLayerBtnEl = document.getElementById('clear-layer-btn');
   var globalZoneSelectEl = document.getElementById('global-zone-select');
+  var exportYamlBtnEl = document.getElementById('export-yaml-btn');
+  var exportTextareaEl = document.getElementById('export-textarea');
+  var exportCaptionEl = document.getElementById('export-caption');
+  var exportStatusEl = document.getElementById('export-status');
+  var importDeviceBtnEl = document.getElementById('import-device-btn');
+  var importStatusEl = document.getElementById('import-status');
 
   // Pitfall 1 / RESEARCH A1: the firmware's save-confirmation state
   // (save_pending()/save_ok()/save_error()) is one shared, global set of
@@ -1069,6 +1125,373 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   });
   // === Global Zone field END ===
 
+  // === Export YAML / Import from Device (13-05-PLAN.md, WEBUI-04) ===
+  //
+  // Adapted from card.js's validateGridsForExport/buildExportYaml/
+  // copyToClipboardWithFallback/handleExportClick/handleImportClick/
+  // mergeImportedMapConfig (card.js lines 681-1015). The LOGIC (suspicious-
+  // grid gate, only-set-optional-keys builder, injection-safe ids, 3-tier
+  // clipboard fallback, confirm-then-act ordering, D-05/D-07 reset-on-
+  // import) is preserved. The STATE SOURCE differs from card.js: this
+  // bundle has no zoneMeta closure object (card.js's from-scratch per-
+  // session drafting state) - sensitivity/zone_type are read live from
+  // each zone row's <select> elements instead, since this is a device-
+  // hosted CURRENT-STATE editor (every zone already exists on the device),
+  // not a blank drafting canvas. There is also no "zone:new:*" locally-
+  // drafted zone concept in this bundle (Add Zone always POSTs immediately
+  // via /api/zones/create and only becomes a real "zone:<id>" editorState
+  // key after a successful create+poll) - the 'zone:new:' guards below are
+  // kept anyway so that invariant holds by construction, not merely by the
+  // accidental absence of a code path that could create one.
+
+  var ZONE_TYPE_NAMES_BY_VALUE = (function () {
+    var out = {};
+    for (var name in ZONE_TYPES_JS) {
+      if (Object.prototype.hasOwnProperty.call(ZONE_TYPES_JS, name)) {
+        out[ZONE_TYPES_JS[name]] = name;
+      }
+    }
+    return out;
+  })();
+
+  // Returns { presenceSensitivity (raw int), zoneType (raw int), label }
+  // read live from the zone's DOM row, or defensive defaults if the row
+  // can't be found (should be unreachable - loadZones() always populates
+  // editorState's zone:<id> keys in lockstep with the Zone List panel's
+  // rows).
+  function getZoneRowMeta(zoneId) {
+    var row = zoneListEl.querySelector('.zone-row[data-zone-id="' + zoneId + '"]');
+    if (!row) {
+      return { presenceSensitivity: 2, zoneType: 0, label: 'Zone ' + zoneId };
+    }
+    var sensitivitySelect = row.querySelector('.sensitivity-select');
+    var zoneTypeSelect = row.querySelector('.zone-type-select');
+    var nameEl = row.querySelector('.zone-name');
+    return {
+      presenceSensitivity: sensitivitySelect ? parseInt(sensitivitySelect.value, 10) : 2,
+      zoneType: zoneTypeSelect ? parseInt(zoneTypeSelect.value, 10) : 0,
+      label: nameEl ? nameEl.textContent : ('Zone ' + zoneId)
+    };
+  }
+
+  function hasActiveCell(grid) {
+    return Array.isArray(grid) && grid.some(function (row) {
+      return Array.isArray(row) && row.some(function (cell) { return !!cell; });
+    });
+  }
+
+  function emitGridLines(grid, keyName, indentLevel, out) {
+    var pad = function (level) { return new Array(level + 1).join('  '); };
+    out.push(pad(indentLevel) + keyName + ': |');
+    FP2Codec.gridToAscii(grid).split('\n').forEach(function (row) {
+      out.push(pad(indentLevel + 1) + row);
+    });
+  }
+
+  // Only-set-optional-keys YAML builder, byte-exact to parse_ascii_grid
+  // (grids are serialized via FP2Codec.gridToAscii, the same codec module
+  // FP2Codec.gridToHex/hexToGrid already ported verbatim - never a second
+  // grid-to-text implementation). presence_sensitivity is always emitted;
+  // zone_type is only emitted when the row's current selection is not the
+  // "none"/0 default - the closest equivalent in this data model to
+  // card.js's "meta.zoneType !== null" only-set check, since this bundle's
+  // <select> always shows SOME value (there is no separate "untouched"
+  // state to test here). D-06 (13-CONTEXT.md, 13-RESEARCH.md Pitfall 3):
+  // motion_timeout has NO UI control this phase - the emission point is
+  // documented below for parity-gap traceability but can never fire.
+  function buildExportYaml() {
+    var lines = [];
+    var usedIds = {};
+    function uniqueId(candidate) {
+      var id = candidate;
+      var n = 2;
+      while (usedIds[id]) {
+        id = candidate + '_' + n++;
+      }
+      if (id !== candidate) {
+        console.warn('[FP2 Zones] buildExportYaml: zone id "' + candidate + '" collided - renamed to "' + id + '"');
+      }
+      usedIds[id] = true;
+      return id;
+    }
+
+    [['interference', 'interference_grid'], ['exit', 'exit_grid'], ['edge', 'edge_grid']].forEach(function (pair) {
+      var grid = editorState[pair[0]];
+      if (!Array.isArray(grid)) {
+        console.warn('[FP2 Zones] buildExportYaml: malformed grid: ' + pair[0]);
+        return;
+      }
+      if (hasActiveCell(grid)) emitGridLines(grid, pair[1], 0, lines);
+    });
+
+    // Only-if-touched global_zone: block (card.js Phase 5/D-03 precedent),
+    // matching CONFIG_SCHEMA's own key order (global_zone precedes zones
+    // in components/aqara_fp2/__init__.py).
+    if (globalZoneSensitivity !== null) {
+      lines.push('global_zone:');
+      lines.push('  presence_sensitivity: ' + globalZoneSensitivity);
+    }
+
+    var zoneKeys = Object.keys(editorState).filter(function (k) { return k.indexOf('zone:') === 0; });
+    if (zoneKeys.length > 0) {
+      lines.push('zones:');
+      zoneKeys.forEach(function (key) {
+        var grid = editorState[key];
+        var zoneId = key.slice('zone:'.length);
+        var meta = getZoneRowMeta(zoneId);
+        // Zone ids in this bundle are always the device's own numeric
+        // zone_id (never user-supplied text), so a plain "zone_<id>" is
+        // already injection-safe by construction - no slugify step needed
+        // (unlike card.js's resolveZoneExportId, which slugifies a
+        // user-editable zone name).
+        lines.push('  - id: ' + uniqueId('zone_' + zoneId));
+        if (Array.isArray(grid)) emitGridLines(grid, 'grid', 2, lines);
+        else console.warn('[FP2 Zones] buildExportYaml: malformed grid: ' + key);
+        lines.push('    presence_sensitivity: ' + (SENSITIVITY_INT_TO_STRING[meta.presenceSensitivity] || 'medium'));
+        var tn = meta.zoneType !== 0 ? ZONE_TYPE_NAMES_BY_VALUE[meta.zoneType] : null;
+        if (tn) lines.push('    zone_type: ' + tn);
+        // D-06: motion_timeout has no UI control this phase - there is no
+        // value to read here, so the key is always omitted. This is the
+        // SAME known export-parity gap v1.0 had, not a silent drop
+        // introduced this phase (13-CONTEXT.md D-06).
+      });
+    }
+
+    return lines.join('\n');
+  }
+
+  // Flags a grid that's entirely empty (0 active cells) OR entirely filled
+  // (all 196 active) as suspicious; a normal partially-painted grid
+  // produces no entry. A malformed (non-14x14) grid is flagged defensively
+  // instead of counted - should be unreachable given editorState is always
+  // seeded 14x14 by FP2Codec.hexToGrid. Never throws (card.js VAL-01/D-06
+  // precedent).
+  function validateGridsForExport() {
+    var suspicious = [];
+    var globalLayers = [
+      ['interference', 'Interference Grid'],
+      ['exit', 'Exit Grid'],
+      ['edge', 'Edge Grid']
+    ];
+    var zoneLayers = Object.keys(editorState)
+      .filter(function (k) { return k.indexOf('zone:') === 0; })
+      .map(function (k) { return [k, getZoneRowMeta(k.slice('zone:'.length)).label]; });
+
+    globalLayers.concat(zoneLayers).forEach(function (pair) {
+      var key = pair[0];
+      var label = pair[1];
+      var grid = editorState[key];
+      var malformed = !Array.isArray(grid) || grid.length !== GRID_SIZE ||
+        !grid.every(function (row) { return Array.isArray(row) && row.length === GRID_SIZE; });
+      if (malformed) {
+        suspicious.push(label + ': malformed grid (not 14x14)');
+        return;
+      }
+      var active = grid.reduce(function (sum, row) {
+        return sum + row.reduce(function (s, c) { return s + (c ? 1 : 0); }, 0);
+      }, 0);
+      if (active === 0) {
+        suspicious.push(label + ': empty (no cells painted)');
+      } else if (active === GRID_SIZE * GRID_SIZE) {
+        suspicious.push(label + ': entirely filled (all 196 cells active)');
+      }
+    });
+
+    return suspicious;
+  }
+
+  // 3-tier clipboard fallback, never throws (every fallback only warns).
+  // Tier 1: Clipboard API, requires a secure context - this device serves
+  // plain http://, so tier 1 may be entirely unavailable
+  // (13-RESEARCH.md "Don't Hand-Roll"). Tier 2: document.execCommand('copy'),
+  // honoring its BOOLEAN return. Tier 3: leave the pre-selected textarea
+  // visible for a manual copy. The textarea stays populated/visible
+  // regardless of which tier "succeeded" - the caller shows it before this
+  // runs. Returns a Promise resolving to 'clipboard-api' | 'exec-command' |
+  // 'manual-only'.
+  function copyToClipboardWithFallback(text, textareaEl) {
+    function execCommandFallback() {
+      if (textareaEl && document.execCommand) {
+        try {
+          textareaEl.focus();
+          textareaEl.select();
+          if (typeof textareaEl.setSelectionRange === 'function') {
+            textareaEl.setSelectionRange(0, text.length);
+          }
+          if (document.execCommand('copy') === true) {
+            return 'exec-command';
+          }
+          console.warn("[FP2 Zones] copyToClipboardWithFallback: execCommand('copy') returned false, falling back to manual copy");
+        } catch (e) {
+          console.warn('[FP2 Zones] copyToClipboardWithFallback: execCommand threw, falling back to manual copy', e);
+        }
+      }
+      console.warn('[FP2 Zones] copyToClipboardWithFallback: automatic copy unavailable - textarea left visible/pre-selected for manual copy');
+      return 'manual-only';
+    }
+
+    if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () {
+        return 'clipboard-api';
+      }, function (e) {
+        console.warn('[FP2 Zones] copyToClipboardWithFallback: Clipboard API write failed, falling back', e);
+        return execCommandFallback();
+      });
+    }
+    return Promise.resolve(execCommandFallback());
+  }
+
+  function setExportStatus(text, isFailed) {
+    exportStatusEl.classList.toggle('is-failed', !!isFailed);
+    exportStatusEl.textContent = text || '';
+  }
+
+  // Confirm-then-act ordering (card.js Pitfall 9 precedent):
+  // validateGridsForExport() + a synchronous window.confirm() resolve to
+  // completion BEFORE buildExportYaml()/the clipboard write ever run -
+  // cancelling the confirm is an unconditional early return, nothing is
+  // ever built or copied.
+  function handleExportClick() {
+    var suspicious = validateGridsForExport();
+    if (suspicious.length > 0) {
+      var proceed = window.confirm('The following grids look suspicious:\n\n' + suspicious.join('\n') + '\n\nExport anyway?');
+      if (!proceed) {
+        return;
+      }
+    }
+
+    var yaml = buildExportYaml();
+    exportTextareaEl.value = yaml;
+    exportTextareaEl.style.display = '';
+    exportCaptionEl.style.display = '';
+    setExportStatus('');
+
+    copyToClipboardWithFallback(yaml, exportTextareaEl).then(function (tier) {
+      if (tier === 'manual-only') {
+        setExportStatus('Clipboard unavailable — copy the YAML below manually.', false);
+      } else {
+        setExportStatus('Copied to clipboard.', false);
+      }
+    });
+  }
+
+  exportYamlBtnEl.addEventListener('click', handleExportClick);
+
+  var IMPORT_CONFIRM_COPY = "Import will overwrite the global grids and every existing device zone's grid/sensitivity with the device's current configuration. zone_type, motion_timeout, and Global Zone sensitivity will be reset (the device can't report these). Locally-added zones are kept, and zones already created on this device are included. Continue?";
+  var IMPORT_FAILURE_COPY = "Import failed — could not fetch the device's current configuration. Try again.";
+
+  function setImportStatus(text, isFailed) {
+    importStatusEl.classList.toggle('is-failed', !!isFailed);
+    importStatusEl.textContent = text || '';
+  }
+
+  // Merges a fresh GET /api/zones response INTO editorState (never a
+  // wholesale replace of unrelated state) - mirrors card.js's
+  // mergeImportedMapConfig(). Per-row deep copy: FP2Codec.hexToGrid always
+  // builds brand-new row arrays (never aliases editorState), so no
+  // additional .slice() step is needed here, unlike card.js's explicit
+  // `.map(function (row) { return row.slice(); })` (which exists there
+  // because gatherEntityData() can return aliased rows - this bundle's
+  // hexToGrid never does).
+  //
+  // CRITICAL (Pitfall 2 / D-05 / D-07, 13-RESEARCH.md): GET /api/zones DOES
+  // report zone.zone_type per zone whenever the device has one set, but
+  // this merge DELIBERATELY DISCARDS it on every zone/import to honor the
+  // locked D-05/D-07 decision - this is intentional, NOT an oversight. Do
+  // NOT "fix" this by reading z.zone_type into the rendered rows below. The
+  // same applies to motion_timeout (no live source at all, same as v1.0)
+  // and Global Zone sensitivity (also has no live source). The reset is
+  // surfaced to the user via the exact inline Import-success copy in
+  // handleImportClick() below, so the UI never silently claims to
+  // round-trip a field it actually discards (13-05-PLAN.md prohibition).
+  function mergeImportedMapConfig(data) {
+    mountingPosition = data.mounting_position || mountingPosition;
+    leftRightReverse = data.left_right_reverse === true;
+
+    editorState.interference = FP2Codec.hexToGrid(data.interference_grid);
+    editorState.exit = FP2Codec.hexToGrid(data.exit_grid);
+    editorState.edge = FP2Codec.hexToGrid(data.edge_grid);
+
+    var deviceZones = Array.isArray(data.zones) ? data.zones : [];
+
+    // Orphan deletion: drop every zone:<id> key not present in the freshly-
+    // imported list (a zone-count DECREASE since the last load). The
+    // 'zone:new:' guard preserves any locally-added-but-not-yet-saved key
+    // by construction (this bundle never actually creates one - Add Zone
+    // always POSTs immediately - but the guard costs nothing and matches
+    // card.js's Pitfall 1 discipline exactly).
+    var deviceZoneKeys = {};
+    deviceZones.forEach(function (z) { deviceZoneKeys['zone:' + z.id] = true; });
+    Object.keys(editorState).forEach(function (key) {
+      if (key.indexOf('zone:') === 0 && key.indexOf('zone:new:') !== 0 && !deviceZoneKeys[key]) {
+        delete editorState[key];
+      }
+    });
+
+    deviceZones.forEach(function (z) {
+      editorState['zone:' + z.id] = FP2Codec.hexToGrid(z.grid);
+    });
+
+    // Reset zone_type/motion_timeout/Global Zone on EVERY import (Pitfall
+    // 2/D-05/D-07 - see function header comment above). Build a rendering
+    // copy of the zones array with zone_type stripped so renderZoneRow()
+    // (which defaults an absent/non-number zone_type to 0/"none") shows the
+    // reset state, never the device's real reported value. sensitivity IS
+    // recoverable and is passed through unchanged - only zone_type is
+    // deliberately discarded.
+    var resetZonesForRender = deviceZones.map(function (z) {
+      return { id: z.id, sensitivity: z.sensitivity, presence_sensor: z.presence_sensor };
+    });
+    renderZoneList(resetZonesForRender);
+    redrawAllLayers();
+    populateLayerSelect(resetZonesForRender);
+
+    globalZoneSensitivity = null;
+    globalZoneSelectEl.value = '';
+
+    return deviceZones.length;
+  }
+
+  // Confirm -> await fetch('/api/zones') (SAME endpoint the page-load seed
+  // and the Zone List panel already use - NO new endpoint) -> merge ->
+  // inline success/failure copy, strictly in that order. A cancelled
+  // confirm is an unconditional early return BEFORE any side effect
+  // (mirrors handleExportClick()'s guard-then-act shape, extended to the
+  // async case). A fetch failure leaves editorState untouched entirely -
+  // the merge only ever runs after a successful fetch.
+  function handleImportClick() {
+    if (!window.confirm(IMPORT_CONFIRM_COPY)) {
+      return;
+    }
+
+    importDeviceBtnEl.disabled = true;
+    importDeviceBtnEl.textContent = 'Importing…';
+    setImportStatus('');
+
+    fetch('/api/zones')
+      .then(function (resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(function (data) {
+        var importedCount = mergeImportedMapConfig(data);
+        importDeviceBtnEl.disabled = false;
+        importDeviceBtnEl.textContent = 'Import from Device';
+        setImportStatus(
+          'Imported ' + importedCount + " zone(s) from the device. zone_type, motion_timeout, and Global Zone sensitivity can't be read from the device and were reset — re-set them if needed before exporting.",
+          false
+        );
+      })
+      .catch(function () {
+        importDeviceBtnEl.disabled = false;
+        importDeviceBtnEl.textContent = 'Import from Device';
+        setImportStatus(IMPORT_FAILURE_COPY, true);
+      });
+  }
+
+  importDeviceBtnEl.addEventListener('click', handleImportClick);
+  // === Export YAML / Import from Device END ===
+
   // Ported from card.js's FP2Geometry.targetToGridXY (lines ~173-188): corner
   // mounts use the verified 7m x 7m transform; wall mount reuses card.js's
   // own not-yet-verified placeholder (rawX/rawY * 0.01) rather than inventing
@@ -1322,6 +1745,13 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
         renderZoneList(data.zones || []);
         redrawAllLayers();
         populateLayerSelect(data.zones || []);
+
+        // 13-UI-SPEC.md UI Considerations: Export/Import stay disabled
+        // until the first successful load so neither can act on
+        // stale/absent data; idempotent to call again on every later
+        // successful refresh (e.g. after Add/Remove).
+        exportYamlBtnEl.disabled = false;
+        importDeviceBtnEl.disabled = false;
       })
       .catch(function () {
         showLoadError();
@@ -1475,9 +1905,32 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
     var sensitivitySelect = row.querySelector('.sensitivity-select');
     var zoneTypeSelect = row.querySelector('.zone-type-select');
+    // Pitfall 4 (13-RESEARCH.md): grid_hex sent to /api/zones/save MUST be
+    // the 80-char canonical write format (FP2Codec.gridToHex) - NEVER the
+    // 56-char display format GET /api/zones returns, and NEVER a raw
+    // round-trip of that GET response straight into this POST body. The
+    // grid always comes from editorState (built once via FP2Codec.hexToGrid
+    // at seed/import time, then mutated only by the paint/erase handlers),
+    // never re-read from the wire here. A zone whose layer the user never
+    // painted this session still saves correctly: editorState was already
+    // seeded from the device on load, so gridToHex of that unpainted grid
+    // still produces a valid 80-char string identical to what the device
+    // already has.
+    var zoneGrid = editorState['zone:' + zoneId];
+    if (!Array.isArray(zoneGrid)) {
+      // Defensive backstop only - should be unreachable, since loadZones()
+      // always seeds editorState['zone:<id>'] for every rendered row before
+      // its Save button can be clicked. Reuses FP2Codec.hexToGrid('')
+      // (already the single source of truth for building an empty grid)
+      // rather than a second empty-grid literal.
+      console.warn('[FP2 Zones] handleSaveClick: no editorState grid for zone ' + zoneId + ', saving an empty grid');
+      zoneGrid = FP2Codec.hexToGrid('');
+    }
+    var gridHex = FP2Codec.gridToHex(zoneGrid);
     var body = 'zone_id=' + encodeURIComponent(zoneId) +
       '&sensitivity=' + encodeURIComponent(sensitivitySelect.value) +
-      '&zone_type=' + encodeURIComponent(zoneTypeSelect.value);
+      '&zone_type=' + encodeURIComponent(zoneTypeSelect.value) +
+      '&grid_hex=' + encodeURIComponent(gridHex);
 
     fetch('/api/zones/save', {
       method: 'POST',
