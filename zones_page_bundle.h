@@ -210,6 +210,42 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     border-color: #D8DCE1;
     cursor: not-allowed;
   }
+  .layer-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #D8DCE1;
+  }
+  .mode-toggle-btn {
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 4px;
+    padding: 0 16px;
+    min-width: 44px;
+    min-height: 44px;
+    cursor: pointer;
+  }
+  .mode-toggle-btn.mode-paint { background: #2563EB; }
+  .mode-toggle-btn.mode-erase { background: #DC2626; }
+  .clear-layer-btn {
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    color: #DC2626;
+    background: #FFFFFF;
+    border: 1px solid #DC2626;
+    border-radius: 4px;
+    padding: 0 16px;
+    min-width: 44px;
+    min-height: 44px;
+    cursor: pointer;
+  }
   .add-zone-bar {
     display: flex;
     align-items: center;
@@ -249,6 +285,16 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
   <section class="panel" id="live-view-panel">
     <h2 class="panel-title">Live View</h2>
+    <div class="layer-toolbar">
+      <div class="field-group">
+        <label class="field-label" for="layer-select">Layer</label>
+        <select id="layer-select" disabled>
+          <option value="" disabled selected>Loading&hellip;</option>
+        </select>
+      </div>
+      <button type="button" id="paint-mode-toggle" class="mode-toggle-btn mode-paint">Paint</button>
+      <button type="button" id="clear-layer-btn" class="clear-layer-btn">Clear Layer</button>
+    </div>
     <div id="live-grid-container">
       <svg id="live-grid" viewBox="0 0 14 14" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
@@ -292,6 +338,9 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   var addZoneSelectEl = document.getElementById('add-zone-select');
   var addZoneBtnEl = document.getElementById('add-zone-btn');
   var capacityMessageEl = document.getElementById('capacity-message');
+  var layerSelectEl = document.getElementById('layer-select');
+  var paintModeToggleEl = document.getElementById('paint-mode-toggle');
+  var clearLayerBtnEl = document.getElementById('clear-layer-btn');
 
   // Pitfall 1 / RESEARCH A1: the firmware's save-confirmation state
   // (save_pending()/save_ok()/save_error()) is one shared, global set of
@@ -861,6 +910,114 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   liveGridEl.addEventListener('pointerleave', endStroke);
   // === Pointer-driven paint/erase END ===
 
+  // === Layer toolbar (13-04-PLAN.md Task 1, WEBUI-04/D-01) ===
+  //
+  // Ports card.js's .editor-controls row (layer-select/paint-mode-toggle/
+  // clear-layer-btn) minus icons (13-UI-SPEC.md "Layer toolbar" — no
+  // <ha-icon> custom element on this standalone page). Drives the
+  // selectedLayer/paintMode closure vars Task 2/3 above already default and
+  // read.
+
+  // (Re)builds the #layer-select <option>s in the FIXED order Interference/
+  // Exit/Edge, then one "Zone {id}" per zone, from the SAME zones array
+  // loadZones() already fetched for the Zone List panel (same source, same
+  // order) — no separate fetch. Called once loadZones()'s GET /api/zones
+  // resolves; until then the select stays disabled showing the "Loading…"
+  // placeholder already in the initial markup.
+  function populateLayerSelect(zones) {
+    var fixedLayers = [
+      ['interference', 'Interference Grid'],
+      ['exit', 'Exit Grid'],
+      ['edge', 'Edge Grid']
+    ];
+    // Same id/label fallback as renderZoneRow() above (zone.presence_sensor
+    // || 'Zone {id}') so the Layer select and the Zone List panel never
+    // disagree on a zone's display label.
+    var zoneLayers = (zones || []).map(function (z) {
+      return ['zone:' + z.id, z.presence_sensor ? z.presence_sensor : ('Zone ' + z.id)];
+    });
+    var desired = fixedLayers.concat(zoneLayers);
+
+    var previousValue = selectedLayer;
+
+    layerSelectEl.disabled = false;
+    while (layerSelectEl.firstChild) {
+      layerSelectEl.removeChild(layerSelectEl.firstChild);
+    }
+    desired.forEach(function (pair) {
+      var option = document.createElement('option');
+      option.value = pair[0];
+      option.textContent = pair[1];
+      layerSelectEl.appendChild(option);
+    });
+
+    // Preserve the current selection across a rebuild (e.g. after Add/
+    // Remove triggers a fresh loadZones()) if it still exists; otherwise
+    // fall back to whatever the <select> now defaults to (its first option).
+    if (previousValue && desired.some(function (pair) { return pair[0] === previousValue; })) {
+      layerSelectEl.value = previousValue;
+      selectedLayer = previousValue;
+    } else {
+      selectedLayer = layerSelectEl.value || null;
+    }
+
+    // Programmatically setting .value does not fire 'change' — reconcile the
+    // dashed selected-layer outline explicitly (mirrors card.js's
+    // populateLayerSelect()/clearSelectedLayer() reconcile discipline).
+    redrawSelectedOutline();
+  }
+
+  layerSelectEl.addEventListener('change', function () {
+    selectedLayer = layerSelectEl.value || null;
+    console.log('[FP2 Zones] Layer selection changed: ' + selectedLayer);
+    redrawSelectedOutline();
+  });
+
+  // Paint/Erase mode toggle: default "Paint" (Accent), active "Erase"
+  // (Destructive) — exact tooltip copy from 13-UI-SPEC.md's Copywriting
+  // Contract, ported verbatim.
+  var PAINT_ERASE_TOOLTIP = 'Click/drag to fill cells on the selected layer. Hold Shift while painting to erase instead.';
+  paintModeToggleEl.title = PAINT_ERASE_TOOLTIP;
+
+  function updatePaintModeAffordance() {
+    var isErase = paintMode === 'erase';
+    paintModeToggleEl.classList.toggle('mode-paint', !isErase);
+    paintModeToggleEl.classList.toggle('mode-erase', isErase);
+    paintModeToggleEl.textContent = isErase ? 'Erase' : 'Paint';
+  }
+  updatePaintModeAffordance();
+
+  paintModeToggleEl.addEventListener('click', function () {
+    paintMode = paintMode === 'erase' ? 'paint' : 'erase';
+    console.log('[FP2 Zones] Paint mode toggled: ' + paintMode);
+    updatePaintModeAffordance();
+  });
+
+  // Clear Layer: window.confirm-gated (exact copy from 13-UI-SPEC.md, ported
+  // verbatim from card.js's clearSelectedLayer()), empties ONLY the
+  // currently-selected layer's grid in editorState. Cancel is a no-op.
+  clearLayerBtnEl.addEventListener('click', function () {
+    if (!selectedLayer) {
+      console.warn('[FP2 Zones] Clear blocked: no layer selected');
+      return;
+    }
+    var label = (layerSelectEl.selectedIndex >= 0 && layerSelectEl.options[layerSelectEl.selectedIndex])
+      ? layerSelectEl.options[layerSelectEl.selectedIndex].textContent
+      : selectedLayer;
+    if (!window.confirm('Clear "' + label + '"? This cannot be undone.')) {
+      return;
+    }
+    // Array.from(...) builds 14 independent row arrays — never share a
+    // single row reference across the grid (mirrors card.js's
+    // clearSelectedLayer() / FP2Codec.emptyGrid() discipline).
+    editorState[selectedLayer] = Array.from({ length: GRID_SIZE }, function () {
+      return Array(GRID_SIZE).fill(0);
+    });
+    console.log('[FP2 Zones] Cleared layer: ' + selectedLayer);
+    redrawLayerByKey(selectedLayer);
+  });
+  // === Layer toolbar END ===
+
   // Ported from card.js's FP2Geometry.targetToGridXY (lines ~173-188): corner
   // mounts use the verified 7m x 7m transform; wall mount reuses card.js's
   // own not-yet-verified placeholder (rawX/rawY * 0.01) rather than inventing
@@ -1113,6 +1270,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
         renderZoneList(data.zones || []);
         redrawAllLayers();
+        populateLayerSelect(data.zones || []);
       })
       .catch(function () {
         showLoadError();
