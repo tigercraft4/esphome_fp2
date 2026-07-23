@@ -109,12 +109,15 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
   // POST /api/zones/save - WEBUI-02: submit-then-poll deferred mutation.
   // zone_id/sensitivity are required; a missing one is rejected with 400 and
   // nothing is scheduled (empty/null-input probe). zone_type is optional,
-  // defaulting to -1 (unset). The grid is never accepted from the client -
-  // save_zone_from_editor() looks it up server-side by zone_id (D-01). The
-  // only mutation reference is inside the scheduler lambda below - this
-  // method never calls a FP2Component write method directly on the httpd
-  // task, and never waits on save_pending() (no spin-wait, no wait_until:
-  // port).
+  // defaulting to -1 (unset). WEBUI-04 (13-01): grid_hex is now ALSO
+  // optional - when the client (the /zones painting UI) supplies one, it
+  // must be exactly 80 hex characters and is threaded through to
+  // save_zone_from_editor(); when absent, save_zone_from_editor() still
+  // looks the grid up server-side by zone_id (D-01), so every non-editor
+  // caller and every pre-Plan-13-01 client is unaffected. The only mutation
+  // reference is inside the scheduler lambda below - this method never
+  // calls a FP2Component write method directly on the httpd task, and never
+  // waits on save_pending() (no spin-wait, no wait_until: port).
   void handle_post_save_(esphome::web_server_idf::AsyncWebServerRequest *request) {
     if (request->getParam("zone_id") == nullptr || request->getParam("sensitivity") == nullptr) {
       request->send(400, "application/json", R"({"error":"zone_id and sensitivity are required"})");
@@ -171,6 +174,24 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
       zone_type = (int) zone_type_l;
     }
 
+    // WEBUI-04 (13-01): optional client-painted grid. When present, must be
+    // exactly 80 hex characters (the canonical write format - see Pitfall 4
+    // in 13-RESEARCH.md; this is NOT the 56-char "card format" GET
+    // /api/zones uses for display). This is a cheap synchronous length-only
+    // check on the httpd task, matching the strtol()+endptr+range idiom
+    // above; hex-charset validation is deliberately left to
+    // save_zone_to_sensor()'s own (d) check inside the deferred call below,
+    // not duplicated here.
+    std::string grid_hex;
+    if (request->getParam("grid_hex") != nullptr) {
+      grid_hex = request->arg("grid_hex");
+      if (grid_hex.size() != 80) {
+        request->send(400, "application/json",
+                       R"({"error":"grid_hex must be exactly 80 hex characters"})");
+        return;
+      }
+    }
+
     // CR-01: mark the save as pending synchronously, before scheduling the
     // deferred mutation, so a GET /api/zones/status that lands immediately
     // after this 202 response can never observe a stale {pending:false}.
@@ -181,8 +202,9 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
 
     esphome::aqara_fp2::FP2Component *fp2 = this->fp2_;
     esphome::App.scheduler.set_timeout(this->fp2_, "zone_editor_save", 1,
-        [fp2, zone_id, sensitivity, zone_type]() {
-          fp2->save_zone_from_editor((uint8_t) zone_id, (uint8_t) sensitivity, zone_type);
+        [fp2, zone_id, sensitivity, zone_type, grid_hex]() {
+          fp2->save_zone_from_editor((uint8_t) zone_id, (uint8_t) sensitivity, zone_type,
+                                      grid_hex);
         });
 
     request->send(202, "application/json", R"({"status":"pending"})");

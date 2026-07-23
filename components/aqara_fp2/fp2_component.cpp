@@ -1119,7 +1119,14 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
 // every validation (zone_id membership, sensitivity range, zone_type
 // allowlist, grid_hex length/charset) unchanged (V5 reuse - no new
 // validation added here).
-void FP2Component::save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type) {
+// WEBUI-04 (13-01): grid_hex is now an optional trailing param (default ""
+// lives only in the header declaration, not repeated here). When the caller
+// (the /zones painting UI, via handle_post_save_()) supplies a non-empty
+// client-painted grid, it is already the canonical 80-char hex form and is
+// used as-is - no re-encoding. When empty (every pre-existing caller), the
+// server-side zones_ lookup below runs unchanged.
+void FP2Component::save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type,
+                                          const std::string &grid_hex) {
   // CR-01 fix (11-03): hand off pending-state ownership to
   // pending_save_attr_ids_/save_failed_ (set below, inside
   // save_zone_to_sensor()) now that this is actually running on the main
@@ -1133,30 +1140,37 @@ void FP2Component::save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, i
   // also sets this as its own first statement (idempotent) since it has
   // other, direct callers too.
   this->save_batch_in_progress_ = true;
-  std::string grid_hex;
-  // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) entries -
-  // save_zone_to_sensor()'s own (a) check below already rejects a removed
-  // zone_id, so leaving grid_hex empty for it is correct either way, but
-  // matching the active-only convention avoids reading a stale grid off a
-  // hidden/removed zone.
-  for (const auto &zone : zones_) {
-    if (zone->active && zone->id == zone_id) {
-      // Build all 40 bytes as an 80-char lowercase hex string. Deliberately
-      // NOT grid_to_hex_card_format() - that helper emits only 56 chars (14
-      // rows) for the /zones list view's display, which would fail
-      // save_zone_to_sensor()'s exactly-80-character length check.
-      char byte_hex[3];
-      for (size_t i = 0; i < zone->grid.size(); i++) {
-        snprintf(byte_hex, sizeof(byte_hex), "%02x", zone->grid[i]);
-        grid_hex += byte_hex;
+  std::string hex = grid_hex;
+  if (hex.empty()) {
+    // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) entries -
+    // save_zone_to_sensor()'s own (a) check below already rejects a removed
+    // zone_id, so leaving hex empty for it is correct either way, but
+    // matching the active-only convention avoids reading a stale grid off a
+    // hidden/removed zone.
+    for (const auto &zone : zones_) {
+      if (zone->active && zone->id == zone_id) {
+        // Build all 40 bytes as an 80-char lowercase hex string. Deliberately
+        // NOT grid_to_hex_card_format() - that helper emits only 56 chars (14
+        // rows) for the /zones list view's display, which would fail
+        // save_zone_to_sensor()'s exactly-80-character length check.
+        char byte_hex[3];
+        for (size_t i = 0; i < zone->grid.size(); i++) {
+          snprintf(byte_hex, sizeof(byte_hex), "%02x", zone->grid[i]);
+          hex += byte_hex;
+        }
+        break;
       }
-      break;
     }
+    // If zone_id isn't found, hex stays empty - save_zone_to_sensor()
+    // rejects unknown zone_id first (its own (a) check), so an empty hex
+    // never reaches the (d) length check.
   }
-  // If zone_id isn't found, grid_hex stays empty - save_zone_to_sensor()
-  // rejects unknown zone_id first (its own (a) check), so an empty grid_hex
-  // never reaches the (d) length check.
-  this->save_zone_to_sensor(zone_id, grid_hex, sensitivity, zone_type);
+  // WEBUI-04: when a non-empty client grid was supplied above, it is used
+  // directly here without re-encoding. Its hex-charset validity ((d) check)
+  // is deliberately delegated to save_zone_to_sensor() below, not duplicated
+  // here - see 13-PATTERNS.md "Validation delegate to reuse, do not
+  // duplicate".
+  this->save_zone_to_sensor(zone_id, hex, sensitivity, zone_type);
 }
 
 void FP2LocationSwitch::write_state(bool state) {
