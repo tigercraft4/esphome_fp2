@@ -69,6 +69,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     white-space: nowrap;
   }
   .badge.is-live { color: #2563EB; font-weight: 600; }
+  .badge.is-connected { color: #0E7490; }
   .badge.is-disconnected { color: #DC2626; }
   .panel {
     background: #FFFFFF;
@@ -1570,10 +1571,13 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   // --- Live-connection badge (UI-SPEC Copywriting Contract) ---
 
   function setBadge(state) {
-    badgeEl.classList.remove('is-live', 'is-disconnected');
+    badgeEl.classList.remove('is-live', 'is-connected', 'is-disconnected');
     if (state === 'live') {
       badgeEl.textContent = '● Live';
       badgeEl.classList.add('is-live');
+    } else if (state === 'connected') {
+      badgeEl.textContent = 'Connected';
+      badgeEl.classList.add('is-connected');
     } else if (state === 'disconnected') {
       badgeEl.textContent = 'Disconnected';
       badgeEl.classList.add('is-disconnected');
@@ -1589,6 +1593,14 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   // so no client-side filtering of other event names is needed.
   var sseConnected = false;
   var sse = new EventSource('/zones/events');
+  sse.onopen = function () {
+    // Proves the EventSource HTTP connection is open even when no
+    // target_update has arrived yet (e.g. no person in view). Never
+    // downgrades an already-live badge.
+    if (!sseConnected) {
+      setBadge('connected');
+    }
+  };
   sse.addEventListener('target_update', function (e) {
     if (!sseConnected) {
       sseConnected = true;
