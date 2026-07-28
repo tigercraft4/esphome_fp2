@@ -97,6 +97,15 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     padding: 16px 0;
   }
   .zone-row:last-child { border-bottom: none; }
+  .zone-row.is-paint-target {
+    outline: 3px solid #2563EB;
+    outline-offset: 4px;
+    border-radius: 4px;
+    background: #EFF6FF;
+  }
+  .zone-row.is-paint-target .save-btn {
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.4);
+  }
   .zone-row-header {
     display: flex;
     align-items: center;
@@ -1062,10 +1071,26 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     redrawSelectedOutline();
   }
 
+  // Selecting a "Zone N" paint layer visually links the painting panel to
+  // that zone's row-level "Save to Sensor" button (paint->save discoverability).
+  function highlightZoneRowForLayer(layerKey) {
+    var stale = zoneListEl.querySelectorAll('.zone-row.is-paint-target');
+    for (var i = 0; i < stale.length; i++) {
+      stale[i].classList.remove('is-paint-target');
+    }
+    if (!layerKey || layerKey.indexOf('zone:') !== 0) return;
+    var zoneId = layerKey.slice('zone:'.length);
+    var row = zoneListEl.querySelector('.zone-row[data-zone-id="' + zoneId + '"]');
+    if (!row) return;
+    row.classList.add('is-paint-target');
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   layerSelectEl.addEventListener('change', function () {
     selectedLayer = layerSelectEl.value || null;
     console.log('[FP2 Zones] Layer selection changed: ' + selectedLayer);
     redrawSelectedOutline();
+    highlightZoneRowForLayer(selectedLayer);
   });
 
   // Paint/Erase mode toggle: default "Paint" (Accent), active "Erase"
