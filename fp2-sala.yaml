@@ -1,12 +1,9 @@
 esphome:
   name: fp2-sala
-  # WEBUI-01/02/03 (11-04): copy the 11-02/11-03 project-owned headers into
-  # the build src root so fp2_component.cpp's #include "zones_web_handler.h"
-  # resolves (zones_web_handler.h in turn serves zones_page_bundle.h's
-  # PROGMEM bundle).
-  includes:
-    - zones_page_bundle.h
-    - zones_web_handler.h
+  # zones_page_bundle.h / zones_web_handler.h now live in
+  # components/aqara_fp2/ (moved 2026-07-28) so the git external_component
+  # fetch below pulls them automatically — no manual `includes:`/file copy
+  # needed for a fresh HA/ESPHome-addon install.
 
 esp32:
   board: esp32-solo1
