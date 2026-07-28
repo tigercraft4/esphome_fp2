@@ -170,7 +170,10 @@ external_components:
   - source:
       type: git
       url: https://github.com/tigercraft4/esphome_fp2
-      ref: main
+      # TEMPORARY (Phase 13 hardware validation, 2026-07-28): points at the
+      # v1.2 feature branch instead of main because main doesn't have
+      # Phase 10-13 yet. Revert to `ref: main` once this branch is merged.
+      ref: gsd/v1.2-device-hosted-web-ui-live-zone-registry
     refresh: 0s
     components: [aqara_fp2, aqara_fp2_accel]
 
