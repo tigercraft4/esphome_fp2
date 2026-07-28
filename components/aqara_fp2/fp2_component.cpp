@@ -579,16 +579,19 @@ void FP2Component::rehydrate_zone_registry_() {
       if (ov.zone_type >= 0) {
         zone->set_zone_type((uint8_t) ov.zone_type);
       }
-      // Finding 2: name/object_id strings must outlive the entity -
-      // set_name_and_object_id() stores raw, unowned const char* pointers.
-      // Heap-allocate and never free (matches ESPHome codegen's own
-      // lifetime assumption: a string literal baked into flash forever).
+      // Finding 2 (ported for ESPHome 2026.7.2): the name string must outlive
+      // the entity - configure_entity_() (invoked internally by the 4-arg
+      // App.register_binary_sensor() overload) stores it as a non-owning
+      // StringRef. Heap-allocate and never free (matches ESPHome codegen's
+      // own lifetime assumption: a string literal baked into flash forever).
+      // object_id_hash=0 makes configure_entity_ auto-derive the object_id
+      // from the name (snake_case), yielding "zone_n_presence" - identical
+      // to the old explicit value. device_class is intentionally left unset
+      // (entity_fields=0): 2026.7.2 device_class is a codegen-interned table
+      // index with no runtime string->index setter (D-2).
       auto *name = new std::string("Zone " + std::to_string(id) + " Presence");
-      auto *object_id = new std::string("zone_" + std::to_string(id) + "_presence");
       auto *sensor = new binary_sensor::BinarySensor();
-      sensor->set_name_and_object_id(name->c_str(), object_id->c_str());
-      sensor->set_device_class("occupancy");
-      App.register_binary_sensor(sensor);
+      App.register_binary_sensor(sensor, name->c_str(), 0, 0);
       zone->set_presence_sensor(sensor);
       this->zone_slot_cache_[id] = zone;
     }
@@ -752,16 +755,19 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     if (zone_type >= 0) {
       zone->set_zone_type((uint8_t) zone_type);
     }
-    // Finding 2: name/object_id strings must outlive the entity -
-    // set_name_and_object_id() stores raw, unowned const char* pointers.
-    // Heap-allocate and never free (matches ESPHome codegen's own lifetime
-    // assumption for a compile-time string literal baked into flash forever).
+    // Finding 2 (ported for ESPHome 2026.7.2): the name string must outlive
+    // the entity - configure_entity_() (invoked internally by the 4-arg
+    // App.register_binary_sensor() overload) stores it as a non-owning
+    // StringRef. Heap-allocate and never free (matches ESPHome codegen's own
+    // lifetime assumption for a compile-time string literal baked into flash
+    // forever). object_id_hash=0 makes configure_entity_ auto-derive the
+    // object_id from the name (snake_case), yielding "zone_n_presence" -
+    // identical to the old explicit value. device_class is intentionally
+    // left unset (entity_fields=0): 2026.7.2 device_class is a
+    // codegen-interned table index with no runtime string->index setter (D-2).
     auto *name = new std::string("Zone " + std::to_string(zone_id) + " Presence");
-    auto *object_id = new std::string("zone_" + std::to_string(zone_id) + "_presence");
     auto *sensor = new binary_sensor::BinarySensor();
-    sensor->set_name_and_object_id(name->c_str(), object_id->c_str());
-    sensor->set_device_class("occupancy");
-    App.register_binary_sensor(sensor);  // D-02: visible to HA after next ListEntitiesRequest
+    App.register_binary_sensor(sensor, name->c_str(), 0, 0);  // D-02: visible to HA after next ListEntitiesRequest
     zone->set_presence_sensor(sensor);
     this->zone_slot_cache_[zone_id] = zone;
     // CR-01 fix (12-REVIEW iter2): first time this ID has ever been used
@@ -2116,7 +2122,7 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
   // byte-for-byte parity with the target_tracking text sensor above so
   // card.js's decodeTargetsBase64() works unchanged on the client side.
   if (this->zone_editor_sse_ != nullptr) {
-    this->zone_editor_sse_->try_send_nodefer(base64_str.c_str(), "target_update");
+    this->zone_editor_sse_->try_send_nodefer(base64_str.c_str(), base64_str.size(), "target_update");
   }
 
   // Derived numeric sensors (throttled to ~1 Hz; the raw stream is 10-20 Hz).
