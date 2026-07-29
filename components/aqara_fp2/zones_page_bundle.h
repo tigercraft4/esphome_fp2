@@ -84,29 +84,50 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     line-height: 1.2;
     margin: 0 0 16px 0;
   }
-  #live-grid-container {
-    border: 1px solid #D8DCE1;
-    border-radius: 4px;
-    background: #F1F3F5;
-    line-height: 0;
+  .workspace {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
   }
+  #live-grid-container {
+    position: relative;
+    background: #E8EBEE;
+    border: 2px solid #D8DCE1;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+    line-height: 0;
+    padding: 16px;
+  }
+  .corner-mark {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    pointer-events: none;
+  }
+  .corner-mark-tl { top: 6px; left: 6px; border-top: 2px solid #D8DCE1; border-left: 2px solid #D8DCE1; }
+  .corner-mark-tr { top: 6px; right: 6px; border-top: 2px solid #D8DCE1; border-right: 2px solid #D8DCE1; }
+  .corner-mark-bl { bottom: 6px; left: 6px; border-bottom: 2px solid #D8DCE1; border-left: 2px solid #D8DCE1; }
+  .corner-mark-br { bottom: 6px; right: 6px; border-bottom: 2px solid #D8DCE1; border-right: 2px solid #D8DCE1; }
   #live-grid { display: block; width: 100%; height: auto; }
   #zone-list { max-height: 480px; overflow-y: auto; }
-  .zone-row {
+  .zone-card {
     border-bottom: 1px solid #D8DCE1;
-    padding: 16px 0;
+    border-left: 4px solid transparent;
+    padding: 16px 0 16px 12px;
+    cursor: pointer;
   }
-  .zone-row:last-child { border-bottom: none; }
-  .zone-row.is-paint-target {
-    outline: 3px solid #2563EB;
-    outline-offset: 4px;
+  .zone-card:last-child { border-bottom: none; }
+  .zone-card.is-selected {
     border-radius: 4px;
-    background: #EFF6FF;
   }
-  .zone-row.is-paint-target .save-btn {
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.4);
+  .color-chip {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
   }
-  .zone-row-header {
+  .zone-card-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -327,6 +348,28 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   .export-caption {
     margin-bottom: 8px;
   }
+  .editing-indicator {
+    font-size: 14px;
+    font-weight: 400;
+    color: #5B6470;
+    margin-bottom: 8px;
+  }
+  .sidebar-caption {
+    font-size: 14px;
+    font-weight: 400;
+    color: #5B6470;
+    margin: 0 0 16px 0;
+  }
+  @media (min-width: 900px) {
+    body { max-width: 1080px; }
+    .workspace { grid-template-columns: 1fr 320px; }
+    .sidebar {
+      position: sticky;
+      top: 16px;
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+    }
+  }
   @media (max-width: 480px) {
     body { padding: 8px; }
     .header-bar, .panel { padding: 16px; }
@@ -340,8 +383,10 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     <span id="live-badge" class="badge">Connecting&hellip;</span>
   </header>
 
+  <div class="workspace">
   <section class="panel" id="live-view-panel">
     <h2 class="panel-title">Painting</h2>
+    <div id="editing-indicator" class="editing-indicator"></div>
     <div class="layer-toolbar">
       <div class="field-group">
         <label class="field-label" for="layer-select">Layer</label>
@@ -353,10 +398,13 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       <button type="button" id="clear-layer-btn" class="clear-layer-btn">Clear Layer</button>
     </div>
     <div id="live-grid-container">
+      <div class="corner-mark corner-mark-tl"></div>
+      <div class="corner-mark corner-mark-tr"></div>
+      <div class="corner-mark corner-mark-bl"></div>
+      <div class="corner-mark corner-mark-br"></div>
       <svg id="live-grid" viewBox="0 0 14 14" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
     <div class="legend-row">
-      <span class="legend-entry"><span class="legend-swatch" style="background: rgba(37, 99, 235, 0.35);"></span>Zone</span>
       <span class="legend-entry"><span class="legend-swatch" style="background: rgba(220, 38, 38, 0.30);"></span>Interference</span>
       <span class="legend-entry"><span class="legend-swatch" style="background: rgba(22, 163, 74, 0.75);"></span>Exit</span>
       <span class="legend-entry"><span class="legend-swatch" style="background: rgba(91, 100, 112, 0.35);"></span>Edge</span>
@@ -372,8 +420,9 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     </div>
   </section>
 
-  <section class="panel" id="zones-panel">
+  <section class="panel sidebar" id="zones-panel">
     <h2 class="panel-title">Zones</h2>
+    <p class="sidebar-caption">Each zone's color on the grid above matches its card below.</p>
     <div id="add-zone-bar" class="add-zone-bar">
       <div class="field-group">
         <label class="field-label" for="add-zone-select">Add Zone</label>
@@ -386,6 +435,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       <div class="loading-state">Loading zones&hellip;</div>
     </div>
   </section>
+  </div>
 
   <!-- Export / Import bar (13-05-PLAN.md, WEBUI-04): page-level actions, not
        per-zone, same placement as card.js's single global toolbar. No new
