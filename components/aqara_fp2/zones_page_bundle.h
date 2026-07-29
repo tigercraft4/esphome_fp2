@@ -485,6 +485,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   var addZoneSelectEl = document.getElementById('add-zone-select');
   var addZoneBtnEl = document.getElementById('add-zone-btn');
   var capacityMessageEl = document.getElementById('capacity-message');
+  var editingIndicatorEl = document.getElementById('editing-indicator');
   var layerSelectEl = document.getElementById('layer-select');
   var paintModeToggleEl = document.getElementById('paint-mode-toggle');
   var clearLayerBtnEl = document.getElementById('clear-layer-btn');
@@ -1104,25 +1105,19 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   // selectedLayer/paintMode closure vars Task 2/3 above already default and
   // read.
 
-  // (Re)builds the #layer-select <option>s in the FIXED order Interference/
-  // Exit/Edge, then one "Zone {id}" per zone, from the SAME zones array
-  // loadZones() already fetched for the Zone List panel (same source, same
-  // order) — no separate fetch. Called once loadZones()'s GET /api/zones
-  // resolves; until then the select stays disabled showing the "Loading…"
-  // placeholder already in the initial markup.
-  function populateLayerSelect(zones) {
-    var fixedLayers = [
+  // (Re)builds the #layer-select <option>s. 13.1-UI-SPEC.md "Decision:
+  // Layer dropdown vs. zone cards" — zones are REMOVED from this dropdown;
+  // it now only ever lists the 3 fixed globals. Zone selection is
+  // card-click-only (see renderZoneCard() above / setActivePaintTarget()
+  // below). Called once loadZones()'s GET /api/zones resolves; until then
+  // the select stays disabled showing the "Loading…" placeholder already
+  // in the initial markup.
+  function populateLayerSelect() {
+    var desired = [
       ['interference', 'Interference Grid'],
       ['exit', 'Exit Grid'],
       ['edge', 'Edge Grid']
     ];
-    // Same id/label fallback as renderZoneRow() above (zone.presence_sensor
-    // || 'Zone {id}') so the Layer select and the Zone List panel never
-    // disagree on a zone's display label.
-    var zoneLayers = (zones || []).map(function (z) {
-      return ['zone:' + z.id, z.presence_sensor ? z.presence_sensor : ('Zone ' + z.id)];
-    });
-    var desired = fixedLayers.concat(zoneLayers);
 
     var previousValue = selectedLayer;
 
@@ -1139,7 +1134,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
     // Preserve the current selection across a rebuild (e.g. after Add/
     // Remove triggers a fresh loadZones()) if it still exists; otherwise
-    // fall back to whatever the <select> now defaults to (its first option).
+    // fall back to whatever the <select> now defaults to (its first
+    // option). A zone:<id> previousValue never matches here on purpose
+    // (13.1-RESEARCH.md Pitfall 2) — the caller's reconciliation step
+    // (after populateLayerSelect()) re-applies it via setActivePaintTarget()
+    // if that zone is still present.
     if (previousValue && desired.some(function (pair) { return pair[0] === previousValue; })) {
       layerSelectEl.value = previousValue;
       selectedLayer = previousValue;
@@ -1153,26 +1152,89 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     redrawSelectedOutline();
   }
 
-  // Selecting a "Zone N" paint layer visually links the painting panel to
-  // that zone's row-level "Save to Sensor" button (paint->save discoverability).
-  function highlightZoneRowForLayer(layerKey) {
-    var stale = zoneListEl.querySelectorAll('.zone-row.is-paint-target');
+  // Reads whichever layer/zone is currently the active paint target and
+  // returns the SAME label text the Layer select / zone card already show
+  // (13.1-UI-SPEC.md Copywriting Contract — "never a separate string").
+  function currentTargetLabel(layerKey) {
+    if (!layerKey) return '';
+    if (layerKey.indexOf('zone:') === 0) {
+      var zoneId = layerKey.slice('zone:'.length);
+      return getZoneRowMeta(zoneId).label;
+    }
+    for (var i = 0; i < layerSelectEl.options.length; i++) {
+      if (layerSelectEl.options[i].value === layerKey) {
+        return layerSelectEl.options[i].textContent;
+      }
+    }
+    return layerKey;
+  }
+
+  function updateEditingIndicator() {
+    editingIndicatorEl.textContent = selectedLayer ? ('Editing: ' + currentTargetLabel(selectedLayer)) : '';
+  }
+
+  // Retargeted from the old row-highlighter (13.1-UI-SPEC.md
+  // "Research Finding: the highlight-fix's reason for existing" — retarget,
+  // don't delete, the mechanic). Highlights whichever zone CARD is the
+  // active paint target using that card's OWN stored data-color-index
+  // (never recomputed here — 13.1-RESEARCH.md Pitfall 5) and keeps the
+  // scrollIntoView safety net for the mobile stacked layout.
+  function markActivePaintTarget(layerKey) {
+    var stale = zoneListEl.querySelectorAll('.zone-card.is-selected');
     for (var i = 0; i < stale.length; i++) {
-      stale[i].classList.remove('is-paint-target');
+      stale[i].classList.remove('is-selected');
+      stale[i].style.backgroundColor = '';
+      stale[i].style.boxShadow = '';
     }
     if (!layerKey || layerKey.indexOf('zone:') !== 0) return;
     var zoneId = layerKey.slice('zone:'.length);
-    var row = zoneListEl.querySelector('.zone-row[data-zone-id="' + zoneId + '"]');
-    if (!row) return;
-    row.classList.add('is-paint-target');
-    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    var card = zoneListEl.querySelector('.zone-card[data-zone-id="' + zoneId + '"]');
+    if (!card) return;
+    var colorIndex = parseInt(card.getAttribute('data-color-index'), 10);
+    var palette = ZONE_COLOR_PALETTE[isNaN(colorIndex) ? 0 : colorIndex];
+    card.classList.add('is-selected');
+    card.style.backgroundColor = palette.wash;
+    card.style.boxShadow = '0 0 0 3px ' + palette.shadow;
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // The ONE place selectedLayer is written from user selection — called
+  // from BOTH the Layer dropdown's 'change' handler and each zone card's
+  // click handler (13.1-UI-SPEC.md "selection-sync": a single shared
+  // selectedLayer closure var is the one source of truth both entry points
+  // write to).
+  function setActivePaintTarget(layerKey) {
+    selectedLayer = layerKey || null;
+    redrawSelectedOutline();
+    markActivePaintTarget(selectedLayer);
+    updateEditingIndicator();
+  }
+
+  // 13.1-RESEARCH.md Pitfall 2 (flagged regression risk): once zones are
+  // removed from the dropdown, populateLayerSelect()'s own value-
+  // preservation can never re-match a zone:<id> — every Add/Remove/Import
+  // refresh would otherwise silently reset a zone paint-target back to the
+  // dropdown's default. Call this AFTER populateLayerSelect() at every
+  // reload call site (loadZones() success path, mergeImportedMapConfig())
+  // with the selectedLayer value captured BEFORE that call: if it was a
+  // zone:<id> still present in the freshly-rendered zones, re-apply it via
+  // setActivePaintTarget() (re-syncs outline + card highlight + Editing
+  // indicator); otherwise fall back to the dropdown's current default.
+  function reconcileSelectedLayer(previousSelectedLayer, zones) {
+    if (previousSelectedLayer && previousSelectedLayer.indexOf('zone:') === 0) {
+      var zoneId = previousSelectedLayer.slice('zone:'.length);
+      var stillPresent = (zones || []).some(function (z) { return String(z.id) === zoneId; });
+      if (stillPresent) {
+        setActivePaintTarget(previousSelectedLayer);
+        return;
+      }
+    }
+    setActivePaintTarget(layerSelectEl.value || null);
   }
 
   layerSelectEl.addEventListener('change', function () {
-    selectedLayer = layerSelectEl.value || null;
-    console.log('[FP2 Zones] Layer selection changed: ' + selectedLayer);
-    redrawSelectedOutline();
-    highlightZoneRowForLayer(selectedLayer);
+    console.log('[FP2 Zones] Layer selection changed: ' + (layerSelectEl.value || null));
+    setActivePaintTarget(layerSelectEl.value || null);
   });
 
   // Paint/Erase mode toggle: default "Paint" (Accent), active "Erase"
@@ -1381,11 +1443,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       ['exit', 'Exit Grid'],
       ['edge', 'Edge Grid']
     ];
-    var zoneLayers = Object.keys(editorState)
+    var zoneEntries = Object.keys(editorState)
       .filter(function (k) { return k.indexOf('zone:') === 0; })
       .map(function (k) { return [k, getZoneRowMeta(k.slice('zone:'.length)).label]; });
 
-    globalLayers.concat(zoneLayers).forEach(function (pair) {
+    globalLayers.concat(zoneEntries).forEach(function (pair) {
       var key = pair[0];
       var label = pair[1];
       var grid = editorState[key];
@@ -1550,9 +1612,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     var resetZonesForRender = deviceZones.map(function (z) {
       return { id: z.id, sensitivity: z.sensitivity, presence_sensor: z.presence_sensor };
     });
+    var previousSelectedLayer = selectedLayer;
     renderZoneList(resetZonesForRender);
     redrawAllLayers();
-    populateLayerSelect(resetZonesForRender);
+    populateLayerSelect();
+    reconcileSelectedLayer(previousSelectedLayer, resetZonesForRender);
 
     globalZoneSensitivity = null;
     globalZoneSelectEl.value = '';
@@ -1887,9 +1951,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
           editorState['zone:' + z.id] = FP2Codec.hexToGrid(z.grid);
         });
 
+        var previousSelectedLayer = selectedLayer;
         renderZoneList(data.zones || []);
         redrawAllLayers();
-        populateLayerSelect(data.zones || []);
+        populateLayerSelect();
+        reconcileSelectedLayer(previousSelectedLayer, data.zones || []);
 
         // 13-UI-SPEC.md UI Considerations: Export/Import stay disabled
         // until the first successful load so neither can act on
