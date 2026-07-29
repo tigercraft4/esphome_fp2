@@ -799,6 +799,30 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   var EDGE_HATCH_STROKE = 'rgba(26, 29, 33, 0.3)';
   var SELECTED_OUTLINE_STROKE = '#2563EB';
 
+  // Zone Color Palette (13.1-UI-SPEC.md Color table) — 8 fixed categorical
+  // colors assigned by each zone's position in the currently-rendered zones
+  // array (index % 8). Index 0 (Blue) intentionally equals the ZONE_FILL/
+  // ZONE_BORDER values above so a single-zone build looks identical to
+  // before this redesign. Literal hex/rgba values only, this file's
+  // existing no-CSS-custom-properties convention.
+  var ZONE_COLOR_PALETTE = [
+    { hex: '#2563EB', fill: 'rgba(37, 99, 235, 0.35)', border: 'rgba(37, 99, 235, 0.7)', wash: 'rgba(37, 99, 235, 0.08)', shadow: 'rgba(37, 99, 235, 0.4)' },
+    { hex: '#7C3AED', fill: 'rgba(124, 58, 237, 0.35)', border: 'rgba(124, 58, 237, 0.7)', wash: 'rgba(124, 58, 237, 0.08)', shadow: 'rgba(124, 58, 237, 0.4)' },
+    { hex: '#EA580C', fill: 'rgba(234, 88, 12, 0.35)', border: 'rgba(234, 88, 12, 0.7)', wash: 'rgba(234, 88, 12, 0.08)', shadow: 'rgba(234, 88, 12, 0.4)' },
+    { hex: '#0D9488', fill: 'rgba(13, 148, 136, 0.35)', border: 'rgba(13, 148, 136, 0.7)', wash: 'rgba(13, 148, 136, 0.08)', shadow: 'rgba(13, 148, 136, 0.4)' },
+    { hex: '#DB2777', fill: 'rgba(219, 39, 119, 0.35)', border: 'rgba(219, 39, 119, 0.7)', wash: 'rgba(219, 39, 119, 0.08)', shadow: 'rgba(219, 39, 119, 0.4)' },
+    { hex: '#CA8A04', fill: 'rgba(202, 138, 4, 0.35)', border: 'rgba(202, 138, 4, 0.7)', wash: 'rgba(202, 138, 4, 0.08)', shadow: 'rgba(202, 138, 4, 0.4)' },
+    { hex: '#4F46E5', fill: 'rgba(79, 70, 229, 0.35)', border: 'rgba(79, 70, 229, 0.7)', wash: 'rgba(79, 70, 229, 0.08)', shadow: 'rgba(79, 70, 229, 0.4)' },
+    { hex: '#0891B2', fill: 'rgba(8, 145, 178, 0.35)', border: 'rgba(8, 145, 178, 0.7)', wash: 'rgba(8, 145, 178, 0.08)', shadow: 'rgba(8, 145, 178, 0.4)' }
+  ];
+
+  // Rebuilt on every renderZoneList() call: maps zone.id -> its palette
+  // index (index % 8, by position in the currently-rendered zones array).
+  // The single source both the canvas drawer (redrawZonesLayer) and the
+  // cards (renderZoneCard/markActivePaintTarget) read, so render-time and
+  // highlight-time colors never disagree (13.1-RESEARCH.md Pitfall 5).
+  var zoneColorById = {};
+
   function clearGroup(group) {
     while (group.firstChild) {
       group.removeChild(group.firstChild);
@@ -910,11 +934,13 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   // still "sparse" relative to the SSE tick it must never run on.
   function redrawZonesLayer() {
     clearGroup(zonesLayerGroup);
-    var drawer = makeFillCellDrawer(ZONE_FILL, ZONE_BORDER);
     for (var key in editorState) {
       if (!Object.prototype.hasOwnProperty.call(editorState, key)) continue;
       if (key.indexOf('zone:') !== 0) continue;
-      drawCellsInto(zonesLayerGroup, editorState[key], drawer);
+      var zoneId = key.slice('zone:'.length);
+      var colorIdx = Object.prototype.hasOwnProperty.call(zoneColorById, zoneId) ? zoneColorById[zoneId] : 0;
+      var palette = ZONE_COLOR_PALETTE[colorIdx];
+      drawCellsInto(zonesLayerGroup, editorState[key], makeFillCellDrawer(palette.fill, palette.border));
     }
   }
 
@@ -925,7 +951,13 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     clearGroup(selectedOutlineGroup);
     var grid = selectedLayer ? editorState[selectedLayer] : null;
     if (!grid) return;
-    drawCellsInto(selectedOutlineGroup, grid, makeStrokeCellDrawer(SELECTED_OUTLINE_STROKE, '2', '4,2'));
+    var stroke = SELECTED_OUTLINE_STROKE;
+    if (selectedLayer && selectedLayer.indexOf('zone:') === 0) {
+      var zoneId = selectedLayer.slice('zone:'.length);
+      var colorIdx = Object.prototype.hasOwnProperty.call(zoneColorById, zoneId) ? zoneColorById[zoneId] : 0;
+      stroke = ZONE_COLOR_PALETTE[colorIdx].border;
+    }
+    drawCellsInto(selectedOutlineGroup, grid, makeStrokeCellDrawer(stroke, '2', '4,2'));
   }
 
   function redrawAllLayers() {
@@ -1236,7 +1268,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   // editorState's zone:<id> keys in lockstep with the Zone List panel's
   // rows).
   function getZoneRowMeta(zoneId) {
-    var row = zoneListEl.querySelector('.zone-row[data-zone-id="' + zoneId + '"]');
+    var row = zoneListEl.querySelector('.zone-card[data-zone-id="' + zoneId + '"]');
     if (!row) {
       return { presenceSensitivity: 2, zoneType: 0, label: 'Zone ' + zoneId };
     }
@@ -1510,7 +1542,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
     // Reset zone_type/motion_timeout/Global Zone on EVERY import (Pitfall
     // 2/D-05/D-07 - see function header comment above). Build a rendering
-    // copy of the zones array with zone_type stripped so renderZoneRow()
+    // copy of the zones array with zone_type stripped so renderZoneCard()
     // (which defaults an absent/non-number zone_type to 0/"none") shows the
     // reset state, never the device's real reported value. sensitivity IS
     // recoverable and is passed through unchanged - only zone_type is
@@ -1724,17 +1756,25 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     addZoneBtnEl.disabled = savePending || freeSlotsFull;
   }
 
-  function renderZoneRow(zone) {
-    var row = document.createElement('div');
-    row.className = 'zone-row';
-    row.setAttribute('data-zone-id', zone.id);
+  function renderZoneCard(zone, index) {
+    var card = document.createElement('div');
+    card.className = 'zone-card';
+    card.setAttribute('data-zone-id', zone.id);
+
+    var colorIndex = index % ZONE_COLOR_PALETTE.length;
+    card.setAttribute('data-color-index', colorIndex);
+    var palette = ZONE_COLOR_PALETTE[colorIndex];
+    card.style.borderLeftColor = palette.hex;
 
     var label = zone.presence_sensor ? zone.presence_sensor : ('Zone ' + zone.id);
     var zoneTypeValue = (typeof zone.zone_type === 'number') ? zone.zone_type : 0;
 
-    row.innerHTML =
-      '<div class="zone-row-header">' +
-        '<span class="zone-name" title="' + escapeHtml(label) + '">' + escapeHtml(label) + '</span>' +
+    card.innerHTML =
+      '<div class="zone-card-header">' +
+        '<div class="field-group">' +
+          '<span class="color-chip" style="background: ' + palette.hex + ';"></span>' +
+          '<span class="zone-name" title="' + escapeHtml(label) + '">' + escapeHtml(label) + '</span>' +
+        '</div>' +
         '<div class="zone-controls">' +
           '<div class="field-group">' +
             '<label class="field-label" for="sensitivity-' + zone.id + '">Sensitivity</label>' +
@@ -1754,21 +1794,39 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       '</div>' +
       '<div class="status-line"></div>';
 
-    var saveBtn = row.querySelector('.save-btn');
+    var saveBtn = card.querySelector('.save-btn');
     saveBtn.addEventListener('click', function () {
-      handleSaveClick(zone.id, row, saveBtn);
+      handleSaveClick(zone.id, card, saveBtn);
     });
 
-    var removeBtn = row.querySelector('.remove-btn');
+    var removeBtn = card.querySelector('.remove-btn');
     removeBtn.addEventListener('click', function () {
-      handleRemoveClick(zone.id, row, removeBtn);
+      handleRemoveClick(zone.id, card, removeBtn);
     });
 
-    return row;
+    // Clicking anywhere on the card outside its own controls makes this
+    // zone the active paint target (13.1-UI-SPEC.md "replaces the old
+    // dropdown-based zone selection"). setActivePaintTarget is the single
+    // writer of selectedLayer, shared with the Layer dropdown's 'change'
+    // handler (defined below in the Layer toolbar section).
+    card.addEventListener('click', function (e) {
+      if (e.target.closest('select, button')) return;
+      setActivePaintTarget('zone:' + zone.id);
+    });
+
+    return card;
   }
 
   function renderZoneList(zones) {
     zoneListEl.innerHTML = '';
+    // Rebuild the single zoneColorById source of truth on every render so
+    // the canvas drawer (redrawZonesLayer/redrawSelectedOutline) and the
+    // cards/highlight (renderZoneCard/markActivePaintTarget) always agree
+    // on a zone's color (13.1-RESEARCH.md Pitfall 5).
+    zoneColorById = {};
+    (zones || []).forEach(function (zone, i) {
+      zoneColorById[zone.id] = i % ZONE_COLOR_PALETTE.length;
+    });
     if (!zones || zones.length === 0) {
       var empty = document.createElement('div');
       empty.className = 'empty-state';
@@ -1779,7 +1837,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       return;
     }
     for (var i = 0; i < zones.length; i++) {
-      zoneListEl.appendChild(renderZoneRow(zones[i]));
+      zoneListEl.appendChild(renderZoneCard(zones[i], i));
     }
   }
 
