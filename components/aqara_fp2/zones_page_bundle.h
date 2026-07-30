@@ -522,11 +522,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   // dependency, drops into this closure unchanged (13-PATTERNS.md "FP2Codec
   // port"). gridToHex ALWAYS emits the 80-char/40-byte canonical write
   // format; hexToGrid accepts BOTH the 56-char (14-row card/display format,
-  // GET /api/zones' hex fields) and 80-char (write) input, and never throws
-  // on malformed input (WR-02/WR-03 never-throw idiom, Pitfall 4 in
-  // 13-RESEARCH.md: never round-trip a GET /api/zones grid string straight
-  // into a POST /api/zones/save body without going through hexToGrid/
-  // gridToHex first).
+  // POST /api/zones action=list's hex fields) and 80-char (write) input, and
+  // never throws on malformed input (WR-02/WR-03 never-throw idiom, Pitfall 4
+  // in 13-RESEARCH.md: never round-trip an action=list grid string straight
+  // into an action=save body without going through hexToGrid/gridToHex
+  // first).
   var FP2Codec = (function () {
     var ROWS_OUT = 20; // protocol grid rows (only first 14 are ever populated; offset_row=0)
     var OFFSET_ROW = 0;
@@ -1309,8 +1309,9 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   // hosted CURRENT-STATE editor (every zone already exists on the device),
   // not a blank drafting canvas. There is also no "zone:new:*" locally-
   // drafted zone concept in this bundle (Add Zone always POSTs immediately
-  // via /api/zones/create and only becomes a real "zone:<id>" editorState
-  // key after a successful create+poll) - the 'zone:new:' guards below are
+  // via /api/zones action=create and only becomes a real "zone:<id>"
+  // editorState key after a successful create+poll) - the 'zone:new:' guards
+  // below are
   // kept anyway so that invariant holds by construction, not merely by the
   // accidental absence of a code path that could create one.
 
@@ -1624,12 +1625,12 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     return deviceZones.length;
   }
 
-  // Confirm -> await fetch('/api/zones') (SAME endpoint the page-load seed
-  // and the Zone List panel already use - NO new endpoint) -> merge ->
-  // inline success/failure copy, strictly in that order. A cancelled
-  // confirm is an unconditional early return BEFORE any side effect
-  // (mirrors handleExportClick()'s guard-then-act shape, extended to the
-  // async case). A fetch failure leaves editorState untouched entirely -
+  // Confirm -> await POST /api/zones action=list (SAME single endpoint the
+  // page-load seed and the Zone List panel already use - NO new endpoint) ->
+  // merge -> inline success/failure copy, strictly in that order. A
+  // cancelled confirm is an unconditional early return BEFORE any side
+  // effect (mirrors handleExportClick()'s guard-then-act shape, extended to
+  // the async case). A fetch failure leaves editorState untouched entirely -
   // the merge only ever runs after a successful fetch.
   function handleImportClick() {
     if (!window.confirm(IMPORT_CONFIRM_COPY)) {
@@ -1640,7 +1641,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     importDeviceBtnEl.textContent = 'Importing…';
     setImportStatus('');
 
-    fetch('/api/zones')
+    fetch('/api/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'action=list',
+    })
       .then(function (resp) {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         return resp.json();
@@ -1921,7 +1926,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
   function loadZones() {
     zoneListEl.innerHTML = '<div class="loading-state">Loading zones…</div>';
-    fetch('/api/zones')
+    fetch('/api/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'action=list',
+    })
       .then(function (resp) {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         return resp.json();
@@ -1972,7 +1981,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   // --- Add-Zone (ZONEMGMT-01, D-01/D-07): server-computed free-slot dropdown ---
 
   function loadFreeSlots() {
-    fetch('/api/zones/free-slots')
+    fetch('/api/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'action=free_slots',
+    })
       .then(function (resp) {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         return resp.json();
@@ -2011,9 +2024,9 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     updateSaveButtonsDisabled();
     addZoneBtnEl.textContent = 'Adding…';
 
-    var body = 'zone_id=' + encodeURIComponent(zoneId) + '&sensitivity=2';
+    var body = 'zone_id=' + encodeURIComponent(zoneId) + '&sensitivity=2&action=create';
 
-    fetch('/api/zones/create', {
+    fetch('/api/zones', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body
@@ -2036,7 +2049,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   }
 
   function pollAddRemoveStatus() {
-    fetch('/api/zones/status')
+    fetch('/api/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'action=status',
+    })
       .then(function (resp) { return resp.json(); })
       .then(function (data) {
         if (data.pending) {
@@ -2081,9 +2098,9 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     updateSaveButtonsDisabled();
     removeBtn.textContent = 'Removing…';
 
-    var body = 'zone_id=' + encodeURIComponent(zoneId);
+    var body = 'zone_id=' + encodeURIComponent(zoneId) + '&action=delete';
 
-    fetch('/api/zones/delete', {
+    fetch('/api/zones', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body
@@ -2141,9 +2158,10 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     var body = 'zone_id=' + encodeURIComponent(zoneId) +
       '&sensitivity=' + encodeURIComponent(sensitivitySelect.value) +
       '&zone_type=' + encodeURIComponent(zoneTypeSelect.value) +
-      '&grid_hex=' + encodeURIComponent(gridHex);
+      '&grid_hex=' + encodeURIComponent(gridHex) +
+      '&action=save';
 
-    fetch('/api/zones/save', {
+    fetch('/api/zones', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body
@@ -2168,7 +2186,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
   }
 
   function pollSaveStatus(row, saveBtn) {
-    fetch('/api/zones/status')
+    fetch('/api/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'action=status',
+    })
       .then(function (resp) { return resp.json(); })
       .then(function (data) {
         if (data.pending) {
