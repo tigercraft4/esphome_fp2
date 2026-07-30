@@ -5,10 +5,11 @@
 //   - ZonesPageHandler serves the flash-resident /zones page (zones_page_bundle.h,
 //     11-02) at its own sub-path, not device root / (D-03) - the built-in
 //     web_server diagnostics dashboard at / is unaffected.
-//   - ZonesApiHandler serves the /api/zones* JSON contract the 11-02 bundle
-//     already assumes: GET /api/zones (list), GET /api/zones/status (honest
-//     {pending, ok, error} confirmation state), and POST /api/zones/save
-//     (deferred-only mutation, never called from the httpd task itself).
+//   - ZonesApiHandler serves a single POST /api/zones endpoint (13.1.1-02:
+//     CONSOLIDATE-01) dispatched by an `action` form field - list, status,
+//     free_slots, save, create, delete, rename - replacing the prior
+//     six-route-per-verb family. Every write action remains deferred-only,
+//     never mutating FP2Component from the httpd task itself.
 //
 // Follows the same "manual, non-blocking, main-loop-driven" philosophy the
 // DIAG-02 telnet bridge already established in this codebase (fp2_component.cpp) -
@@ -36,39 +37,44 @@ class ZonesPageHandler : public esphome::web_server_idf::AsyncWebHandler {
   }
 };
 
-// Serves the /api/zones* JSON contract: list, save (deferred), status.
+// Serves the single POST /api/zones endpoint: list, status, free_slots, save,
+// create, delete, rename - all dispatched by an `action` form field
+// (13.1.1-02: CONSOLIDATE-01). Every request, read or write, crosses this one
+// canHandle()/handleRequest() pair; the six pre-consolidation handler bodies
+// below are reused verbatim (their WR-02/WR-03/CR-01 contracts are
+// unchanged), plus a new handle_post_rename_ (RENAME-01).
 class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
  public:
   explicit ZonesApiHandler(esphome::aqara_fp2::FP2Component *fp2) : fp2_(fp2) {}
 
   bool canHandle(esphome::web_server_idf::AsyncWebServerRequest *request) const override {
-    auto method = request->method();
-    std::string url = request->url();
-    if (method == HTTP_GET &&
-        (url == "/api/zones" || url == "/api/zones/status" || url == "/api/zones/free-slots")) {
-      return true;
-    }
-    if (method == HTTP_POST &&
-        (url == "/api/zones/save" || url == "/api/zones/create" || url == "/api/zones/delete")) {
-      return true;
-    }
-    return false;
+    char url_buf[esphome::web_server_idf::AsyncWebServerRequest::URL_BUF_SIZE];
+    return request->method() == HTTP_POST && request->url_to(url_buf) == "/api/zones";
   }
 
+  // Dispatch by `action` form field (application/x-www-form-urlencoded, the
+  // same body encoding every write action already used pre-consolidation -
+  // no JSON body parsing is introduced). request->arg("action") returns ""
+  // for a missing param (never a crash), so a missing action falls through
+  // to the same 400 branch as an unrecognized one.
   void handleRequest(esphome::web_server_idf::AsyncWebServerRequest *request) override {
-    std::string url = request->url();
-    if (request->method() == HTTP_GET && url == "/api/zones") {
+    std::string action = request->arg("action");
+    if (action == "list") {
       this->handle_get_zones_(request);
-    } else if (request->method() == HTTP_GET && url == "/api/zones/status") {
+    } else if (action == "status") {
       this->handle_get_status_(request);
-    } else if (request->method() == HTTP_GET && url == "/api/zones/free-slots") {
+    } else if (action == "free_slots") {
       this->handle_get_free_slots_(request);
-    } else if (request->method() == HTTP_POST && url == "/api/zones/save") {
+    } else if (action == "save") {
       this->handle_post_save_(request);
-    } else if (request->method() == HTTP_POST && url == "/api/zones/create") {
+    } else if (action == "create") {
       this->handle_post_create_(request);
-    } else if (request->method() == HTTP_POST && url == "/api/zones/delete") {
+    } else if (action == "delete") {
       this->handle_post_delete_(request);
+    } else if (action == "rename") {
+      this->handle_post_rename_(request);
+    } else {
+      request->send(400, "application/json", R"({"error":"unknown or missing action"})");
     }
   }
 
