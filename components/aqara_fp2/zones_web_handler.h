@@ -355,5 +355,90 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
     request->send(200, "application/json", out.c_str());
   }
 
+  // POST /api/zones (action=rename) - RENAME-01: pure NVS-metadata mutation,
+  // sharing the save/create/delete WR-02/WR-03 precedents but structurally
+  // distinct: a rename never touches the radar UART queue or
+  // pending_save_attr_ids_ batch-tracking, so it returns 200 synchronously
+  // (not 202/poll) - there is no radar ACK to wait on. Follows
+  // handle_post_delete_'s guard ordering, then diverges for the name field
+  // and response code.
+  //
+  // WR-03-equivalent CSRF note (matches handle_post_create_/
+  // handle_post_delete_ verbatim in intent): this action has NO CSRF
+  // protection - no origin/referrer check, no CSRF token, and (per project
+  // convention) no auth by default. Mitigate by enabling the ESPHome
+  // `web_server: auth:` block if this device is reachable by untrusted LAN
+  // clients. Not expanded here - pre-existing, already-accepted project-level
+  // risk.
+  //
+  // The only fp2_ call that mutates persisted state is inside the scheduler
+  // lambda below (locked milestone decision: every mutation is deferred onto
+  // the main loop, never called directly from the httpd task).
+  void handle_post_rename_(esphome::web_server_idf::AsyncWebServerRequest *request) {
+    if (request->getParam("zone_id") == nullptr || request->getParam("name") == nullptr) {
+      request->send(400, "application/json", R"({"error":"zone_id and name are required"})");
+      return;
+    }
+
+    // Shared in-flight guard: a rename must not race a save/create/delete
+    // already draining the radar batch.
+    if (this->fp2_->save_pending()) {
+      request->send(409, "application/json", R"({"error":"a save is already in progress"})");
+      return;
+    }
+
+    // WR-02: strtol()+endptr+range validation before any narrowing cast, so
+    // garbage input is rejected with 400 instead of silently coerced.
+    const std::string zone_id_str = request->arg("zone_id");
+    char *end = nullptr;
+    long zone_id_l = strtol(zone_id_str.c_str(), &end, 10);
+    if (end == zone_id_str.c_str() || *end != '\0' || zone_id_l < 0 || zone_id_l > 31) {
+      request->send(400, "application/json", R"({"error":"zone_id must be an integer 0-31"})");
+      return;
+    }
+
+    int zone_id = (int) zone_id_l;
+
+    // RENAME-01 scope fence (CONTEXT.md): compile-time (YAML-defined) zones
+    // are not renamable - only runtime-created zones get this capability.
+    if (!this->fp2_->is_runtime_zone((uint8_t) zone_id)) {
+      request->send(400, "application/json",
+                     R"({"error":"zone_id is not a runtime-created zone and cannot be renamed"})");
+      return;
+    }
+
+    // V5 input validation: reject empty, oversized (fits char[32] NVS buffer
+    // minus NUL - 31 usable chars), or control-character names before
+    // scheduling the persist. This string round-trips into the /zones page's
+    // rendered DOM and into App.register_binary_sensor()'s `name` argument,
+    // so it is stripped of the stored-XSS/overflow class here, not left to
+    // the renderer.
+    std::string name = request->arg("name");
+    bool name_valid = !name.empty() && name.size() <= 31;
+    if (name_valid) {
+      for (unsigned char c : name) {
+        if (c < 0x20 || c == 0x7f) {
+          name_valid = false;
+          break;
+        }
+      }
+    }
+    if (!name_valid) {
+      request->send(400, "application/json",
+                     R"({"error":"name must be 1-31 printable characters"})");
+      return;
+    }
+
+    // A rename has no radar ACK to wait on (it is a local NVS write with no
+    // in-flight save state) - no mark_editor_save_queued()/202-poll here,
+    // unlike save/create/delete.
+    esphome::aqara_fp2::FP2Component *fp2 = this->fp2_;
+    esphome::App.scheduler.set_timeout(this->fp2_, "zone_rename", 1, [fp2, zone_id, name]() {
+      fp2->rename_zone_at_runtime((uint8_t) zone_id, name);
+    });
+
+    request->send(200, "application/json", R"({"status":"ok"})");
+  }
+
   esphome::aqara_fp2::FP2Component *fp2_;
 };
