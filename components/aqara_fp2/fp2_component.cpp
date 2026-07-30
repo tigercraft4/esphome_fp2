@@ -517,6 +517,28 @@ void FP2Component::save_zone_registry_meta_(uint32_t active_mask) {
   global_preferences->sync();
 }
 
+// RENAME-01 (13.1.1-01): single source of truth for a runtime/rehydrated
+// zone's STABLE object_id_hash - must be called identically from both
+// rehydrate_zone_registry_() (below) and add_zone_at_runtime() so a zone's
+// HA entity identity (the wire `key` field) survives every reboot AND a
+// rename, instead of drifting if the two call sites ever computed the
+// canonical string differently. Built from the FIXED, never-renamed
+// canonical string "Zone {id} Presence" - deliberately NOT derived from the
+// zone's current (possibly custom) display name. fnv1_hash_object_id()
+// (esphome/core/helpers.h, transitively included via esphome/core/
+// component.h) applies the same snake_case+sanitize transform ESPHome's own
+// EntityBase::calc_object_id_() uses internally, so this value is
+// bit-identical to the hash an already-flashed device previously
+// auto-derived at object_id_hash=0 - existing entity identity is preserved,
+// not just new zones' (13.1.1-RESEARCH.md "Object ID Decoupling"). Defined
+// here, ahead of both call sites below, so no forward declaration is needed
+// (mirrors fp2_is_valid_zone_type_()'s single-source-of-truth placement
+// further down this file).
+static uint32_t fp2_stable_zone_object_id_hash_(uint8_t zone_id) {
+  std::string canonical = "Zone " + std::to_string(zone_id) + " Presence";
+  return fnv1_hash_object_id(canonical.c_str(), canonical.size());
+}
+
 // ZONEMGMT-03/04 (12-01): boot-time rehydration - reconstructs zones_ from
 // the NVS registry (active_mask + per-ID FP2ZoneOverride) BEFORE
 // check_initialization_() can ever run, so its existing full-resend
@@ -584,14 +606,19 @@ void FP2Component::rehydrate_zone_registry_() {
       // App.register_binary_sensor() overload) stores it as a non-owning
       // StringRef. Heap-allocate and never free (matches ESPHome codegen's
       // own lifetime assumption: a string literal baked into flash forever).
-      // object_id_hash=0 makes configure_entity_ auto-derive the object_id
-      // from the name (snake_case), yielding "zone_n_presence" - identical
-      // to the old explicit value. device_class is intentionally left unset
-      // (entity_fields=0): 2026.7.2 device_class is a codegen-interned table
-      // index with no runtime string->index setter (D-2).
+      // RENAME-01 (13.1.1-01): object_id_hash is now explicitly PINNED (see
+      // the shared stable-hash helper above) from the fixed canonical name -
+      // intentionally NOT auto-derived from the (possibly custom) display
+      // name, so a rename never changes this zone's HA entity/history. The
+      // pinned value is bit-identical to what auto-derive-from-name
+      // previously computed for the never-renamed canonical name, so
+      // already-flashed devices keep the same entity identity. device_class
+      // is intentionally left unset (entity_fields=0): 2026.7.2 device_class
+      // is a codegen-interned table index with no runtime string->index
+      // setter (D-2).
       auto *name = new std::string("Zone " + std::to_string(id) + " Presence");
       auto *sensor = new binary_sensor::BinarySensor();
-      App.register_binary_sensor(sensor, name->c_str(), 0, 0);
+      App.register_binary_sensor(sensor, name->c_str(), fp2_stable_zone_object_id_hash_(id), 0);
       zone->set_presence_sensor(sensor);
       this->zone_slot_cache_[id] = zone;
     }
@@ -760,14 +787,17 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
     // App.register_binary_sensor() overload) stores it as a non-owning
     // StringRef. Heap-allocate and never free (matches ESPHome codegen's own
     // lifetime assumption for a compile-time string literal baked into flash
-    // forever). object_id_hash=0 makes configure_entity_ auto-derive the
-    // object_id from the name (snake_case), yielding "zone_n_presence" -
-    // identical to the old explicit value. device_class is intentionally
-    // left unset (entity_fields=0): 2026.7.2 device_class is a
-    // codegen-interned table index with no runtime string->index setter (D-2).
+    // forever). RENAME-01 (13.1.1-01): object_id_hash is now explicitly
+    // PINNED (see the shared stable-hash helper near rehydrate_zone_registry_())
+    // from the fixed canonical name - intentionally NOT auto-derived from
+    // the (possibly custom) display name, so a rename never changes this
+    // zone's HA entity/history. device_class is intentionally left unset
+    // (entity_fields=0): 2026.7.2 device_class is a codegen-interned table
+    // index with no runtime string->index setter (D-2).
     auto *name = new std::string("Zone " + std::to_string(zone_id) + " Presence");
     auto *sensor = new binary_sensor::BinarySensor();
-    App.register_binary_sensor(sensor, name->c_str(), 0, 0);  // D-02: visible to HA after next ListEntitiesRequest
+    // D-02: visible to HA after next ListEntitiesRequest
+    App.register_binary_sensor(sensor, name->c_str(), fp2_stable_zone_object_id_hash_(zone_id), 0);
     zone->set_presence_sensor(sensor);
     this->zone_slot_cache_[zone_id] = zone;
     // CR-01 fix (12-REVIEW iter2): first time this ID has ever been used
