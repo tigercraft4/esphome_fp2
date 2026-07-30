@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace esphome {
@@ -481,6 +482,45 @@ void FP2Component::save_zone_override_(uint8_t zone_id, const GridMap &grid, uin
   global_preferences->sync();
 }
 
+// RENAME-01 (13.1.1-01): custom-name NVS load/save - exact mirror of
+// load_zone_override_()/save_zone_override_() above (same
+// make_preference<T>(fnv1_hash(...)) + sync() idiom, 09-RESEARCH.md Pattern
+// 4 / Finding 3), but keyed on a DISTINCT "fp2_zone_name_<id>" string and
+// versioned by the separate FP2_ZONE_NAME_VERSION constant - never
+// FP2_OVERRIDE_VERSION - so adding/changing a custom name can never
+// invalidate an existing FP2ZoneOverride blob.
+bool FP2Component::load_zone_name_(uint8_t zone_id, char *out, size_t out_len) {
+  FP2ZoneName tmp;
+  auto pref = global_preferences->make_preference<FP2ZoneName>(
+      fnv1_hash("fp2_zone_name_" + std::to_string(zone_id)));
+  if (!pref.load(&tmp) || tmp.version != FP2_ZONE_NAME_VERSION) {
+    return false;
+  }
+  // Defensive bound: tmp.name is itself a fixed char[32] guaranteed
+  // NUL-terminated by save_zone_name_()'s bounded copy below, but never
+  // trust a loaded NVS blob's terminator blindly.
+  strncpy(out, tmp.name, out_len - 1);
+  out[out_len - 1] = '\0';
+  return true;
+}
+
+void FP2Component::save_zone_name_(uint8_t zone_id, const char *name) {
+  FP2ZoneName ov{FP2_ZONE_NAME_VERSION, {}};
+  // T-13.1.1-01: bounded copy of at most 31 chars + explicit NUL - never an
+  // unbounded copy into the fixed 32-byte buffer, regardless of what the
+  // caller passes (the httpd handler landing in Plan 02 also rejects an
+  // over-length name upstream with a 400, but this helper must not rely on
+  // that alone).
+  strncpy(ov.name, name, sizeof(ov.name) - 1);
+  ov.name[sizeof(ov.name) - 1] = '\0';
+  auto pref = global_preferences->make_preference<FP2ZoneName>(
+      fnv1_hash("fp2_zone_name_" + std::to_string(zone_id)));
+  pref.save(&ov);
+  // Finding 3 (12-01) - do not omit: a name write is not durable until this
+  // sync() flushes it to flash.
+  global_preferences->sync();
+}
+
 bool FP2Component::load_global_zone_override_(FP2GlobalZoneOverride *out) {
   auto pref = global_preferences->make_preference<FP2GlobalZoneOverride>(
       fnv1_hash("fp2_global_zone_override"));
@@ -601,6 +641,16 @@ void FP2Component::rehydrate_zone_registry_() {
       if (ov.zone_type >= 0) {
         zone->set_zone_type((uint8_t) ov.zone_type);
       }
+      // RENAME-01 (13.1.1-01): load a persisted custom name (if any) into the
+      // live zone BEFORE registering, and register the HA-visible display
+      // name as custom_name when set, else the canonical default - the
+      // object_id_hash stays pinned to the canonical string either way (see
+      // the shared stable-hash helper above), so this display-name choice
+      // never affects HA entity identity.
+      this->load_zone_name_(id, zone->custom_name, sizeof(zone->custom_name));
+      std::string display_name = zone->custom_name[0] != '\0'
+                                      ? std::string(zone->custom_name)
+                                      : ("Zone " + std::to_string(id) + " Presence");
       // Finding 2 (ported for ESPHome 2026.7.2): the name string must outlive
       // the entity - configure_entity_() (invoked internally by the 4-arg
       // App.register_binary_sensor() overload) stores it as a non-owning
@@ -616,7 +666,7 @@ void FP2Component::rehydrate_zone_registry_() {
       // is intentionally left unset (entity_fields=0): 2026.7.2 device_class
       // is a codegen-interned table index with no runtime string->index
       // setter (D-2).
-      auto *name = new std::string("Zone " + std::to_string(id) + " Presence");
+      auto *name = new std::string(display_name);
       auto *sensor = new binary_sensor::BinarySensor();
       App.register_binary_sensor(sensor, name->c_str(), fp2_stable_zone_object_id_hash_(id), 0);
       zone->set_presence_sensor(sensor);
@@ -2660,6 +2710,15 @@ void FP2Component::json_get_map_data(JsonObject root) {
       }
       if (zone->presence_sensor != nullptr) {
         zone_obj["presence_sensor"] = zone->presence_sensor->get_name().c_str();
+      }
+      // RENAME-01 (13.1.1-01): emit the custom display name when set so the
+      // /zones page reflects a rename immediately, without waiting for the
+      // next reboot's rehydrate to update the HA entity's own name_ (no
+      // public runtime setter exists in this pinned build - see
+      // rename_zone_at_runtime()'s comment). Omitted entirely when unset,
+      // matching the presence_sensor conditional-emit style above.
+      if (zone->custom_name[0] != '\0') {
+        zone_obj["name"] = zone->custom_name;
       }
     }
   }

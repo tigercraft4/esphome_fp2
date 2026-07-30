@@ -118,6 +118,15 @@ struct FP2Zone : public Component {
   esphome::sensor::Sensor *people_count_sensor{nullptr};
   GridMap grid;
   uint8_t sensitivity; // 1=Low, 2=Med, 3=High
+  // RENAME-01 (13.1.1-01): runtime-zone custom display name, persisted to a
+  // SEPARATE NVS blob (FP2ZoneName, see below) - NOT part of FP2ZoneOverride.
+  // Plain fixed-size char buffer (POD, zero-initialized) rather than
+  // std::string: json_get_map_data() can be invoked cross-task (httpd task
+  // reading FP2Component state) and a std::string's possible SSO/heap
+  // reallocation is not safe to read concurrently with a main-loop writer;
+  // a fixed char[32] read is a benign torn/stale read at worst. Empty first
+  // byte ('\0') means "no custom name - use the canonical default".
+  char custom_name[32]{};
   uint32_t motion_timeout_ms{5000};
   uint32_t last_motion_millis{0};
   bool motion_active{false};
@@ -291,6 +300,24 @@ struct FP2GlobalZoneOverride {
 } __attribute__((packed));
 
 static const uint32_t FP2_OVERRIDE_VERSION = 1;
+
+// RENAME-01 (13.1.1-01): a runtime zone's custom display name, persisted to
+// a DISTINCT, separately-versioned NVS blob (key "fp2_zone_name_<id>") -
+// deliberately NOT a new field on FP2ZoneOverride. Adding a field to
+// FP2ZoneOverride would change its packed byte layout and force
+// FP2_OVERRIDE_VERSION to be bumped, which load_zone_override_() treats a
+// mismatch of as "no override" - silently resetting every already-persisted
+// zone override (grid/sensitivity/zone_type) on the real device to compiled
+// defaults on the very next flash (13.1.1-RESEARCH.md Pitfall 2). Keeping
+// the name in its own blob with its own FP2_ZONE_NAME_VERSION means adding
+// (or ever changing) the name schema can never invalidate an existing
+// FP2ZoneOverride. FP2_OVERRIDE_VERSION above MUST stay 1.
+struct FP2ZoneName {
+  uint32_t version;
+  char name[32];
+} __attribute__((packed));
+
+static const uint32_t FP2_ZONE_NAME_VERSION = 1;
 
 // ZONEMGMT-03 (12-01): fixed 32-slot NVS-backed registry MEMBERSHIP record -
 // which zone IDs (0-31) are currently runtime-registry-managed. Distinct
@@ -686,6 +713,14 @@ protected:
                             int zone_type);
   bool load_global_zone_override_(FP2GlobalZoneOverride *out);
   void save_global_zone_override_(uint8_t presence_sensitivity);
+
+  // RENAME-01 (13.1.1-01): custom-name load/save - a DISTINCT, separately
+  // versioned NVS blob from FP2ZoneOverride above (see FP2ZoneName's
+  // comment). load_* returns false (treated as "no custom name - use the
+  // canonical default") on a missing entry OR a version mismatch, same
+  // graceful-absence contract as load_zone_override_().
+  bool load_zone_name_(uint8_t zone_id, char *out, size_t out_len);
+  void save_zone_name_(uint8_t zone_id, const char *name);
 
   // ZONEMGMT-03/04 (12-01): registry MEMBERSHIP load/save helpers (distinct
   // from the per-zone-content overrides above) plus the boot-time
