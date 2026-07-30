@@ -614,6 +614,22 @@ public:
   // handler wiring alike.
   void add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int zone_type);
   void remove_zone_at_runtime(uint8_t zone_id);
+  // RENAME-01 (13.1.1-01): true only for a runtime-created zone
+  // (zone_slot_cache_ is populated exclusively by rehydrate_zone_registry_()
+  // and add_zone_at_runtime()'s own reuse branch, never by set_zones() - the
+  // compile-time path) - matches the existing compile-time/runtime boundary
+  // add/remove already enforce (CR-02, above). Plain pointer read, safe to
+  // call cross-task from the httpd handler, mirroring how handle_get_zones_
+  // already reads zones_ state without a lock.
+  bool is_runtime_zone(uint8_t zone_id) const {
+    return zone_id < 32 && this->zone_slot_cache_[zone_id] != nullptr;
+  }
+  // RENAME-01 (13.1.1-01): pure NVS-metadata mutation for a runtime zone's
+  // custom display name - deliberately separate from
+  // save_zone_to_sensor()/save_zone_from_editor() (those write to the
+  // physical radar over UART; a rename never does). Runs on the main loop
+  // (deferred via App.scheduler.set_timeout by Plan 02's HTTP handler).
+  void rename_zone_at_runtime(uint8_t zone_id, const std::string &name);
   void json_get_free_slots(JsonObject root);
   // CR-01 fix (11-03): synchronous "a save is in flight" bookkeeping, set by
   // the /api/zones/save httpd handler *before* it schedules the deferred

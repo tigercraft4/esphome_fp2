@@ -893,6 +893,42 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
   pending_save_attr_ids_.push_back(AttrId::ZONE_ACTIVATION_LIST);
 }
 
+// RENAME-01 (13.1.1-01): rename a runtime zone's display name. Pure NVS
+// metadata mutation - deliberately does NOT open a save batch, push any
+// AttrId onto pending_save_attr_ids_, or touch
+// editor_save_queued_/save_batch_in_progress_, because a rename has no
+// radar write and must never appear as an in-flight save to the httpd
+// status poller (save_pending()). Runs on the main loop (the handler landing
+// in Plan 02 defers this call via App.scheduler.set_timeout, same
+// cross-task-safety discipline as add_zone_at_runtime()/
+// remove_zone_at_runtime()).
+//
+// NOTE (13.1.1-RESEARCH.md Open Question 2 / Assumption A2): this pinned
+// ESPHome build's EntityBase/BinarySensor exposes no public runtime setter
+// for an already-registered entity's name_ (a StringRef set once at
+// configure_entity_() time) - so the live HA-visible friendly name only
+// updates after the NEXT reboot's rehydrate_zone_registry_() re-reads this
+// NVS blob and re-registers with the new name. The /zones page gets
+// immediate feedback via json_get_map_data()'s "name" field instead (Task 2)
+// - it does not need to wait for a reboot.
+void FP2Component::rename_zone_at_runtime(uint8_t zone_id, const std::string &name) {
+  if (!this->is_runtime_zone(zone_id)) {
+    // Defensive - the handler landing in Plan 02 already 400s a compile-time
+    // zone_id synchronously, but this deferred entry point must never trust
+    // that guard alone.
+    ESP_LOGW(TAG, "rename_zone_at_runtime: zone_id %u is not a runtime zone", zone_id);
+    return;
+  }
+  FP2Zone *zone = this->zone_slot_cache_[zone_id];
+  // T-13.1.1-01: bounded copy of at most 31 chars + explicit NUL - name is
+  // already length/charset-validated by the httpd handler, but this helper
+  // must not rely on that alone for the fixed-size buffer write.
+  strncpy(zone->custom_name, name.c_str(), sizeof(zone->custom_name) - 1);
+  zone->custom_name[sizeof(zone->custom_name) - 1] = '\0';
+  this->save_zone_name_(zone_id, zone->custom_name);
+  ESP_LOGI(TAG, "Renamed runtime zone %u to \"%s\"", zone_id, zone->custom_name);
+}
+
 // ZONEMGMT-02 (12-02): remove an existing zone at runtime with zero YAML
 // edits or reflash. Deactivate-before-clear ordering (12-RESEARCH.md
 // Pattern 5): the rebuilt ZONE_ACTIVATION_LIST (with this ID zeroed) is
