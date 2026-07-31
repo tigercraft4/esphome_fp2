@@ -1835,7 +1835,12 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     var palette = ZONE_COLOR_PALETTE[colorIndex];
     card.style.borderLeftColor = palette.hex;
 
-    var label = zone.presence_sensor ? zone.presence_sensor : ('Zone ' + zone.id);
+    // RENAME-01: a custom name (set via the rename control below) takes
+    // priority over the HA entity's own name - the entity's display name
+    // only updates on next reboot (no public runtime setter - see
+    // rename_zone_at_runtime()'s backend comment), but the JSON `name` field
+    // reflects a rename immediately.
+    var label = zone.name ? zone.name : (zone.presence_sensor ? zone.presence_sensor : ('Zone ' + zone.id));
     var zoneTypeValue = (typeof zone.zone_type === 'number') ? zone.zone_type : 0;
 
     card.innerHTML =
@@ -1843,6 +1848,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
         '<div class="field-group">' +
           '<span class="color-chip" style="background: ' + palette.hex + ';"></span>' +
           '<span class="zone-name" title="' + escapeHtml(label) + '">' + escapeHtml(label) + '</span>' +
+          '<button type="button" class="rename-btn" aria-label="Rename zone">✎</button>' +
         '</div>' +
         '<div class="zone-controls">' +
           '<div class="field-group">' +
@@ -1871,6 +1877,11 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     var removeBtn = card.querySelector('.remove-btn');
     removeBtn.addEventListener('click', function () {
       handleRemoveClick(zone.id, card, removeBtn);
+    });
+
+    var renameBtn = card.querySelector('.rename-btn');
+    renameBtn.addEventListener('click', function () {
+      handleRenameClick(zone.id, card, renameBtn);
     });
 
     // Clicking anywhere on the card outside its own controls makes this
@@ -2116,6 +2127,54 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
       })
       .catch(function () {
         finishAddRemove(false, 'network error');
+      });
+  }
+
+  // --- Rename (RENAME-01): pure NVS-metadata mutation, no radar ACK to
+  // wait on, so this returns 200 synchronously (no poll loop unlike
+  // add/remove/save). Runtime-only zones (compile-time zones are rejected
+  // 400 by the backend's is_runtime_zone() gate).
+  function handleRenameClick(zoneId, card, renameBtn) {
+    if (savePending) return;
+
+    var nameEl = card.querySelector('.zone-name');
+    var current = nameEl.textContent;
+    var next = window.prompt('Rename zone', current);
+    if (next === null) return;
+    next = next.trim();
+    if (next === '' || next === current) return;
+    if (next.length > 31) {
+      window.alert('Zone name must be 31 characters or fewer.');
+      return;
+    }
+
+    savePending = true;
+    updateSaveButtonsDisabled();
+
+    fetch('/api/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'action=rename&zone_id=' + encodeURIComponent(zoneId) + '&name=' + encodeURIComponent(next)
+    })
+      .then(function (resp) {
+        if (!resp.ok) {
+          return resp.json().catch(function () { return {}; }).then(function (data) {
+            throw new Error(data.error || ('request rejected (' + resp.status + ')'));
+          });
+        }
+        // Name is rendered via textContent (auto-escaped by the DOM, not
+        // string concatenation) - consistent with escapeHtml() elsewhere in
+        // this bundle for the initial render.
+        nameEl.textContent = next;
+        nameEl.title = next;
+        savePending = false;
+        updateSaveButtonsDisabled();
+        loadZones();
+      })
+      .catch(function (err) {
+        window.alert('Rename failed: ' + err.message);
+        savePending = false;
+        updateSaveButtonsDisabled();
       });
   }
 
