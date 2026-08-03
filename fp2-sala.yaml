@@ -250,7 +250,7 @@ aqara_fp2:
         X X X X X X X X X X X X X X
       presence_sensitivity: medium
       presence:
-        name: "Test Zone Presence"
+        name: "Geral"
 
   radar_software_version:
     name: "Radar Software Version"
