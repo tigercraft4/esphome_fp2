@@ -363,7 +363,7 @@ void FP2Component::write_attr_uint16(uint16_t attr_id, uint16_t value) {
 
 void FP2Component::write_attr_uint32(uint16_t attr_id, uint32_t value) {
   AttrId attr = (AttrId) attr_id;
-  ESP_LOGI(TAG, "Queueing raw UINT32 radar write for %s (0x%04X) = %u",
+  ESP_LOGI(TAG, "Queueing raw UINT32 radar write for %s (0x%04X) = %lu",
            attr_id_to_string_(attr), attr_id, value);
   enqueue_command_(OpCode::WRITE, attr, value);
 }
@@ -379,7 +379,7 @@ void FP2Component::configure_sleep_mode(uint16_t width, uint16_t length, uint8_t
   uint32_t zone_size = ((uint32_t) width << 16) | (uint32_t) length;
   std::vector<uint8_t> empty_zone(41, 0x00);
 
-  ESP_LOGI(TAG, "Queueing sleep mode setup width=%u length=%u mount=%u zone_size=0x%08X",
+  ESP_LOGI(TAG, "Queueing sleep mode setup width=%u length=%u mount=%u zone_size=0x%08lX",
            width, length, mount_position, zone_size);
 
   location_reporting_active_ = true;
@@ -1943,7 +1943,7 @@ void FP2Component::handle_ack_(AttrId attr_id) {
       save_batch_in_progress_ = false;
     }
   } else {
-    ESP_LOGW(TAG, "Unexpected ACK 0x%04X (Waiting for 0x%04X)", attr_id,
+    ESP_LOGW(TAG, "Unexpected ACK 0x%04X (Waiting for 0x%04X)", (uint16_t) attr_id,
              (uint16_t) waiting_for_ack_attr_id_);
     publish_radar_debug_("unexpected_ack", attr_id, std::vector<uint8_t>{});
   }
@@ -2298,7 +2298,7 @@ void FP2Component::handle_simple_uint32_report_(const std::vector<uint8_t> &payl
                    ((uint32_t) payload[4] << 16) |
                    ((uint32_t) payload[5] << 8) |
                    (uint32_t) payload[6];
-  ESP_LOGI(TAG, "%s report: %u", name, value);
+  ESP_LOGI(TAG, "%s report: %lu", name, value);
   if (sensor != nullptr) {
     sensor->publish_state(value);
   }
