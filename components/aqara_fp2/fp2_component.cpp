@@ -1,4 +1,8 @@
 #include "fp2_component.h"
+// WEBUI-01/02/03 (11-04): must come after fp2_component.h - zones_web_handler.h
+// includes it back and needs FP2Component fully declared first. Resolved via
+// fp2-sala.yaml's esphome: includes: (Task 3).
+#include "zones_web_handler.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
@@ -7,6 +11,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace esphome {
@@ -167,6 +172,21 @@ void FP2Component::setup() {
   // Reset internal state
   waiting_for_ack_attr_id_ = AttrId::INVALID;
 
+  // ZONEMGMT-03/04 (12-01): rehydrate any runtime-added zones from the NVS
+  // registry BEFORE anything below can gate check_initialization_() (which
+  // only ever runs once the first UART radar frame arrives). This must run
+  // before the web-handler registration block below so the existing
+  // full-resend reconciliation in check_initialization_() sees the complete
+  // zones_ set (compile-time + rehydrated runtime) on the very first pass.
+  rehydrate_zone_registry_();
+
+  // CR-01 fix (12-REVIEW iter2): fix zones_'s backing storage now, before the
+  // web-handler registration block below can ever let the httpd task start
+  // reading it concurrently. 32 is the protocol's hard ceiling on zone IDs
+  // (0-31), so no future add_zone_at_runtime() push_back() can ever exceed
+  // this capacity and trigger a reallocation the httpd task could race.
+  zones_.reserve(32);
+
   // check_initialization_() always boots into WORK_MODE=3 (Zone Detection);
   // reflect that compiled default in the select immediately so it doesn't
   // show "unknown" until the user first interacts with it.
@@ -194,6 +214,28 @@ void FP2Component::setup() {
       telnet_listen_socket_->listen(1);  // backlog=1: single client only (D-05)
       ESP_LOGW(TAG, "telnet raw UART bridge listening on port %u - LAN-ONLY, NO AUTHENTICATION. "
                     "Never expose this port to the internet.", telnet_port_);
+    }
+  }
+
+  // WEBUI-01/02/03 (11-04): register the 11-02/11-03 page+api handlers and
+  // the 11-01 SSE overlay onto the existing web_server. Nothing is
+  // registered unless web_server_id/web_server_base_id were set in YAML
+  // (web_server_base_ stays nullptr otherwise).
+  if (this->web_server_base_ != nullptr) {
+    this->web_server_base_->add_handler(new ::ZonesPageHandler());
+    this->web_server_base_->add_handler(new ::ZonesApiHandler(this));
+    // WR-03 (12-REVIEW): /api/zones/create and /api/zones/delete are
+    // destructive, unauthenticated-by-default POST endpoints with no CSRF
+    // protection - mirrors the telnet bridge's own LAN-ONLY warning above.
+    // Consider adding a `web_server: auth:` block in YAML if this device is
+    // reachable by untrusted clients on the LAN.
+    ESP_LOGW(TAG, "zone editor /api/zones/create and /api/zones/delete are LAN-ONLY, "
+                  "NO CSRF PROTECTION. Never expose this device's web server to the internet.");
+
+    if (this->web_server_ != nullptr) {
+      auto *sse = new esphome::web_server_idf::AsyncEventSource("/zones/events", this->web_server_);
+      this->web_server_base_->add_handler(sse);
+      this->set_zone_editor_sse(sse);
     }
   }
 }
@@ -433,6 +475,50 @@ void FP2Component::save_zone_override_(uint8_t zone_id, const GridMap &grid, uin
   auto pref = global_preferences->make_preference<FP2ZoneOverride>(
       fnv1_hash("fp2_zone_override_" + std::to_string(zone_id)));
   pref.save(&ov);
+  // D-08 (12-01 retrofit): .save() alone only stages an in-RAM buffer -
+  // without this sync() a committed-looking override can be lost on a power
+  // cut before some unrelated core codepath happens to flush it
+  // (12-RESEARCH.md Finding 3). Closes a pre-existing Phase 9 durability gap.
+  global_preferences->sync();
+}
+
+// RENAME-01 (13.1.1-01): custom-name NVS load/save - exact mirror of
+// load_zone_override_()/save_zone_override_() above (same
+// make_preference<T>(fnv1_hash(...)) + sync() idiom, 09-RESEARCH.md Pattern
+// 4 / Finding 3), but keyed on a DISTINCT "fp2_zone_name_<id>" string and
+// versioned by the separate FP2_ZONE_NAME_VERSION constant - never
+// FP2_OVERRIDE_VERSION - so adding/changing a custom name can never
+// invalidate an existing FP2ZoneOverride blob.
+bool FP2Component::load_zone_name_(uint8_t zone_id, char *out, size_t out_len) {
+  FP2ZoneName tmp;
+  auto pref = global_preferences->make_preference<FP2ZoneName>(
+      fnv1_hash("fp2_zone_name_" + std::to_string(zone_id)));
+  if (!pref.load(&tmp) || tmp.version != FP2_ZONE_NAME_VERSION) {
+    return false;
+  }
+  // Defensive bound: tmp.name is itself a fixed char[32] guaranteed
+  // NUL-terminated by save_zone_name_()'s bounded copy below, but never
+  // trust a loaded NVS blob's terminator blindly.
+  strncpy(out, tmp.name, out_len - 1);
+  out[out_len - 1] = '\0';
+  return true;
+}
+
+void FP2Component::save_zone_name_(uint8_t zone_id, const char *name) {
+  FP2ZoneName ov{FP2_ZONE_NAME_VERSION, {}};
+  // T-13.1.1-01: bounded copy of at most 31 chars + explicit NUL - never an
+  // unbounded copy into the fixed 32-byte buffer, regardless of what the
+  // caller passes (the httpd handler landing in Plan 02 also rejects an
+  // over-length name upstream with a 400, but this helper must not rely on
+  // that alone).
+  strncpy(ov.name, name, sizeof(ov.name) - 1);
+  ov.name[sizeof(ov.name) - 1] = '\0';
+  auto pref = global_preferences->make_preference<FP2ZoneName>(
+      fnv1_hash("fp2_zone_name_" + std::to_string(zone_id)));
+  pref.save(&ov);
+  // Finding 3 (12-01) - do not omit: a name write is not durable until this
+  // sync() flushes it to flash.
+  global_preferences->sync();
 }
 
 bool FP2Component::load_global_zone_override_(FP2GlobalZoneOverride *out) {
@@ -446,6 +532,509 @@ void FP2Component::save_global_zone_override_(uint8_t presence_sensitivity) {
   auto pref = global_preferences->make_preference<FP2GlobalZoneOverride>(
       fnv1_hash("fp2_global_zone_override"));
   pref.save(&ov);
+  // D-08 (12-01 retrofit): see save_zone_override_() above - same durability
+  // gap, same fix.
+  global_preferences->sync();
+}
+
+// ZONEMGMT-03/04 (12-01): registry MEMBERSHIP load/save - exact mirror of
+// load_zone_override_()/save_zone_override_() above, but keyed on the fixed
+// literal "fp2_zone_registry_meta" (NOT per-zone-id), since membership is a
+// single 32-slot bitmask shared across all zone IDs.
+bool FP2Component::load_zone_registry_meta_(FP2ZoneRegistryMeta *out) {
+  auto pref = global_preferences->make_preference<FP2ZoneRegistryMeta>(
+      fnv1_hash("fp2_zone_registry_meta"));
+  return pref.load(out) && out->version == FP2_ZONE_REGISTRY_VERSION;
+}
+
+void FP2Component::save_zone_registry_meta_(uint32_t active_mask) {
+  FP2ZoneRegistryMeta meta{FP2_ZONE_REGISTRY_VERSION, active_mask};
+  auto pref = global_preferences->make_preference<FP2ZoneRegistryMeta>(
+      fnv1_hash("fp2_zone_registry_meta"));
+  pref.save(&meta);
+  // Finding 3 - do NOT omit this call. A registry mutation is not
+  // considered persisted until this sync() flushes it to flash.
+  global_preferences->sync();
+}
+
+// RENAME-01 (13.1.1-01): single source of truth for a runtime/rehydrated
+// zone's STABLE object_id_hash - must be called identically from both
+// rehydrate_zone_registry_() (below) and add_zone_at_runtime() so a zone's
+// HA entity identity (the wire `key` field) survives every reboot AND a
+// rename, instead of drifting if the two call sites ever computed the
+// canonical string differently. Built from the FIXED, never-renamed
+// canonical string "Zone {id} Presence" - deliberately NOT derived from the
+// zone's current (possibly custom) display name. fnv1_hash_object_id()
+// (esphome/core/helpers.h, transitively included via esphome/core/
+// component.h) applies the same snake_case+sanitize transform ESPHome's own
+// EntityBase::calc_object_id_() uses internally, so this value is
+// bit-identical to the hash an already-flashed device previously
+// auto-derived at object_id_hash=0 - existing entity identity is preserved,
+// not just new zones' (13.1.1-RESEARCH.md "Object ID Decoupling"). Defined
+// here, ahead of both call sites below, so no forward declaration is needed
+// (mirrors fp2_is_valid_zone_type_()'s single-source-of-truth placement
+// further down this file).
+static uint32_t fp2_stable_zone_object_id_hash_(uint8_t zone_id) {
+  std::string canonical = "Zone " + std::to_string(zone_id) + " Presence";
+  return fnv1_hash_object_id(canonical.c_str(), canonical.size());
+}
+
+// ZONEMGMT-03/04 (12-01): boot-time rehydration - reconstructs zones_ from
+// the NVS registry (active_mask + per-ID FP2ZoneOverride) BEFORE
+// check_initialization_() can ever run, so its existing full-resend
+// reconciliation naturally reconciles runtime-added zones with zero change
+// to check_initialization_() itself. Called once from setup() (12-RESEARCH.md
+// Pattern 1).
+void FP2Component::rehydrate_zone_registry_() {
+  FP2ZoneRegistryMeta meta;
+  if (!load_zone_registry_meta_(&meta)) {
+    // No runtime-added zones ever saved (or a version mismatch) - the
+    // compile-time zones_ set stands as-is. Not an error.
+    return;
+  }
+  for (uint8_t id = 0; id < 32; id++) {
+    if (!(meta.active_mask & (1u << id)))
+      continue;
+
+    // Pitfall 3: compile-time YAML zones and runtime-registry zones share
+    // the same 0-31 ID space via the same zones_ vector. A compile-time
+    // zone always owns its ID - never construct a duplicate runtime zone
+    // for an ID that is already present.
+    bool already_compiled = false;
+    for (const auto &z : zones_) {
+      if (z->id == id) {
+        already_compiled = true;
+        break;
+      }
+    }
+    if (already_compiled)
+      continue;
+
+    FP2ZoneOverride ov;
+    if (!load_zone_override_(id, &ov)) {
+      // active_mask says this ID is a registry-managed slot, but its
+      // content override is missing/corrupt. Never fabricate a default
+      // zone here - that would silently mask a registry-vs-override
+      // divergence. Log and skip; the slot simply stays absent from
+      // zones_ this boot.
+      ESP_LOGW(TAG, "rehydrate: active_mask bit %u set but no override - skipping", id);
+      continue;
+    }
+
+    FP2Zone *zone;
+    if (this->zone_slot_cache_[id] != nullptr) {
+      // Pitfall 4: reuse the ever-constructed object for this ID (from an
+      // earlier remove-then-re-add within this same boot session) rather
+      // than leaking a fresh allocation - ESPHome has no
+      // App.unregister_binary_sensor() to undo a prior registration.
+      zone = this->zone_slot_cache_[id];
+      zone->grid = ov.grid;
+      zone->sensitivity = ov.sensitivity;
+      if (ov.zone_type >= 0) {
+        zone->set_zone_type((uint8_t) ov.zone_type);
+      }
+      if (zone->presence_sensor != nullptr) {
+        zone->presence_sensor->set_internal(false);
+      }
+    } else {
+      zone = new FP2Zone(id, ov.grid, ov.sensitivity);
+      if (ov.zone_type >= 0) {
+        zone->set_zone_type((uint8_t) ov.zone_type);
+      }
+      // RENAME-01 (13.1.1-01): load a persisted custom name (if any) into the
+      // live zone BEFORE registering, and register the HA-visible display
+      // name as custom_name when set, else the canonical default - the
+      // object_id_hash stays pinned to the canonical string either way (see
+      // the shared stable-hash helper above), so this display-name choice
+      // never affects HA entity identity.
+      this->load_zone_name_(id, zone->custom_name, sizeof(zone->custom_name));
+      std::string display_name = zone->custom_name[0] != '\0'
+                                      ? std::string(zone->custom_name)
+                                      : ("Zone " + std::to_string(id) + " Presence");
+      // Finding 2 (ported for ESPHome 2026.7.2): the name string must outlive
+      // the entity - configure_entity_() (invoked internally by the 4-arg
+      // App.register_binary_sensor() overload) stores it as a non-owning
+      // StringRef. Heap-allocate and never free (matches ESPHome codegen's
+      // own lifetime assumption: a string literal baked into flash forever).
+      // RENAME-01 (13.1.1-01): object_id_hash is now explicitly PINNED (see
+      // the shared stable-hash helper above) from the fixed canonical name -
+      // intentionally NOT auto-derived from the (possibly custom) display
+      // name, so a rename never changes this zone's HA entity/history. The
+      // pinned value is bit-identical to what auto-derive-from-name
+      // previously computed for the never-renamed canonical name, so
+      // already-flashed devices keep the same entity identity. device_class
+      // is intentionally left unset (entity_fields=0): 2026.7.2 device_class
+      // is a codegen-interned table index with no runtime string->index
+      // setter (D-2).
+      auto *name = new std::string(display_name);
+      auto *sensor = new binary_sensor::BinarySensor();
+      App.register_binary_sensor(sensor, name->c_str(), fp2_stable_zone_object_id_hash_(id), 0);
+      zone->set_presence_sensor(sensor);
+      this->zone_slot_cache_[id] = zone;
+    }
+    zones_.push_back(zone);
+  }
+}
+
+// WR-02 fix (12-REVIEW #2): single source of truth for the zone_type
+// allowlist, previously duplicated verbatim as a chain of != comparisons in
+// both add_zone_at_runtime() and save_zone_to_sensor(). Must be kept in sync
+// with ZONE_TYPES in components/aqara_fp2/__init__.py by hand - factoring
+// this into one helper means a future update only has one call site to miss.
+// -1 is the sentinel for "not set" (caller did not request a zone_type
+// change), not a real ZONE_TYPES value.
+static bool fp2_is_valid_zone_type_(int zone_type) {
+  return zone_type == -1 || zone_type == 0 || zone_type == 2 || zone_type == 10 ||
+         zone_type == 11 || zone_type == 13 || zone_type == 14 || zone_type == 15 ||
+         zone_type == 23 || zone_type == 36;
+}
+
+// ZONEMGMT-01 (12-02): add a new zone at runtime with zero YAML edits or
+// reflash. Define-before-activate ordering (12-RESEARCH.md Pattern 4):
+// ZONE_MAP/ZONE_SENSITIVITY/[DETECT_ZONE_TYPE]/ZONE_CLOSE_AWAY_ENABLE are
+// enqueued for the new ID BEFORE the rebuilt full ZONE_ACTIVATION_LIST - the
+// FIFO one-ACK-at-a-time command_queue_ guarantees this transmit order.
+void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int zone_type) {
+  // CR-01 fix (12-REVIEW): hand off pending-state ownership to
+  // pending_save_attr_ids_/save_failed_ now that this deferred call is
+  // actually running on the main loop - mirrors save_zone_from_editor()'s
+  // own precedent. Must run FIRST, before the duplicate-ID rejection below,
+  // so even a rejected (duplicate-ID) create call clears the flag the
+  // handle_post_create_ httpd handler set synchronously; otherwise
+  // save_pending() would wedge permanently true after the very first
+  // create/delete call of any outcome.
+  this->editor_save_queued_ = false;
+  // WR-02 fix (12-REVIEW): open the batch for save_pending()'s cross-task
+  // read as the very FIRST statement (paired with the editor_save_queued_
+  // clear above), before any validation runs - otherwise a concurrently
+  // polled GET /api/zones/status could observe a stale pending:false while
+  // this call is already validating/mutating on the main loop.
+  this->save_batch_in_progress_ = true;
+  // V5 (Pitfall 3): duplicate-ID guard scans the LIVE zones_ union - covers
+  // BOTH compile-time YAML zones and already-runtime-added zones, since they
+  // share one 0-31 ID space and one zones_ vector. Never derive this check
+  // from the NVS active_mask alone.
+  // CR-01 fix (12-REVIEW iter2): only an *active* entry counts as "in use" -
+  // zones_ never erases a removed zone anymore (see remove_zone_at_runtime()),
+  // so a previously-removed ID's now-inactive FP2Zone* must not block re-add.
+  for (const auto &z : zones_) {
+    if (z->active && z->id == zone_id) {
+      ESP_LOGW(TAG, "add_zone_at_runtime: zone_id %u already in use", zone_id);
+      save_failed_ = true;
+      save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " already in use";
+      // WR-02 fix (12-REVIEW): a rejected request must leave save_pending()
+      // false, not permanently true (CR-01 wedge-avoidance precedent).
+      this->save_batch_in_progress_ = false;
+      return;
+    }
+  }
+
+  // WR-01 fix (12-REVIEW): zone_type must be -1 (sentinel = not set) or a
+  // ZONE_TYPES value - same allowlist as save_zone_to_sensor()'s check (c).
+  // Pushed down here (rather than only in handle_post_create_) so it applies
+  // uniformly to every caller of add_zone_at_runtime(), not just the one
+  // that happens to validate it today. Without this, an out-of-range
+  // zone_type would be truncated via (uint8_t) cast, persisted to NVS, and
+  // written to the radar's DETECT_ZONE_TYPE register as a value the
+  // firmware was never designed to receive.
+  // WR-02 fix (12-REVIEW #2): allowlist factored into fp2_is_valid_zone_type_()
+  // so this and save_zone_to_sensor()'s identical check can't drift apart.
+  if (!fp2_is_valid_zone_type_(zone_type)) {
+    ESP_LOGW(TAG, "add_zone_at_runtime: invalid zone_type %d", zone_type);
+    save_failed_ = true;
+    save_error_ = std::string("invalid zone_type ") + std::to_string(zone_type);
+    // WR-02 fix (12-REVIEW): clear so a rejected request never wedges
+    // save_pending() permanently true.
+    this->save_batch_in_progress_ = false;
+    return;
+  }
+
+  // CR-02 fix (12-REVIEW #2): reject re-creating a zone_id that is present in
+  // zones_ (active or not - the duplicate-active-ID guard above only catches
+  // the still-active case) but was never tracked in zone_slot_cache_. That
+  // combination means this ID belongs to a compile-time YAML zone that was
+  // removed via /api/zones/delete - zone_slot_cache_ is populated only by
+  // rehydrate_zone_registry_() and this function's own reuse branch below,
+  // never by set_zones() (the compile-time path), so the reuse-vs-construct
+  // branch below would otherwise take the "construct fresh" path and
+  // push_back() a SECOND FP2Zone with the same id. Every id-keyed radar
+  // report dispatch loop (DETECT_ZONE_MOTION/ZONE_PRESENCE/
+  // ZONE_PEOPLE_NUMBER) breaks on first match, so the new, user-visible
+  // entity would never receive an update for the rest of the boot session.
+  for (const auto &z : zones_) {
+    if (z->id == zone_id && this->zone_slot_cache_[zone_id] == nullptr) {
+      ESP_LOGW(TAG, "add_zone_at_runtime: zone_id %u belongs to a compile-time zone and cannot "
+                    "be re-created here",
+               zone_id);
+      save_failed_ = true;
+      save_error_ = std::string("zone_id ") + std::to_string(zone_id) +
+                    " belongs to a compile-time zone and cannot be re-created here";
+      // WR-02 fix (12-REVIEW): clear so a rejected request never wedges
+      // save_pending() permanently true.
+      this->save_batch_in_progress_ = false;
+      return;
+    }
+  }
+
+  ESP_LOGI(TAG, "Adding runtime zone %u (sensitivity=%u, zone_type=%d)", zone_id, sensitivity,
+           zone_type);
+  save_failed_ = false;
+  save_error_.clear();
+  pending_save_attr_ids_.clear();
+
+  // D-04: a newly-created zone defaults to a full 14x14 active grid - it must
+  // be immediately functional since grid painting doesn't exist until Phase 13.
+  GridMap grid = FULL_ACTIVE_GRID;
+
+  // Persist FIRST, durable before the radar sequence: the per-ID content
+  // override and the registry membership bit. Both sync()-flush (12-01/
+  // Finding 3) so a power cut right after this point can never diverge NVS
+  // from whatever gets enqueued to the radar below.
+  save_zone_override_(zone_id, grid, sensitivity, zone_type);
+  FP2ZoneRegistryMeta meta;
+  uint32_t active_mask = load_zone_registry_meta_(&meta) ? meta.active_mask : 0;
+  active_mask |= (1u << zone_id);
+  save_zone_registry_meta_(active_mask);
+
+  // Entity: reuse the cached FP2Zone/BinarySensor for this ID if this slot
+  // was ever constructed earlier this boot (Pitfall 4 - un-hide rather than
+  // leak a fresh allocation on re-add, since ESPHome has no
+  // App.unregister_binary_sensor()); otherwise construct fresh (Pattern 3).
+  FP2Zone *zone;
+  if (this->zone_slot_cache_[zone_id] != nullptr) {
+    zone = this->zone_slot_cache_[zone_id];
+    zone->grid = grid;
+    zone->sensitivity = sensitivity;
+    if (zone_type >= 0) {
+      zone->set_zone_type((uint8_t) zone_type);
+    } else {
+      // WR-02 (12-06): this reused FP2Zone object may carry a zone_type set
+      // during an earlier add-then-remove cycle this boot. A create call
+      // that omits zone_type (sentinel -1) must not let that stale value
+      // leak into this zone's new life - clear the unset marker explicitly.
+      zone->has_zone_type = false;
+    }
+    if (zone->presence_sensor != nullptr) {
+      zone->presence_sensor->set_internal(false);
+    }
+    // WR-01 fix (12-REVIEW): clear stale motion/debounce state from this
+    // object's prior life (add-then-remove earlier this boot) BEFORE
+    // reactivating - otherwise a leftover motion_active/last_motion_millis
+    // could resurrect a phantom "motion on" state for the zone's new life.
+    zone->reset_motion();
+    // CR-01 fix (12-REVIEW iter2): this object is already an entry in
+    // zones_ from an earlier add-then-remove cycle this boot session (never
+    // erased, only deactivated below) - reactivate in place. Do NOT
+    // push_back() again, or this ID would appear twice in zones_.
+    zone->active = true;
+  } else {
+    zone = new FP2Zone(zone_id, grid, sensitivity);
+    if (zone_type >= 0) {
+      zone->set_zone_type((uint8_t) zone_type);
+    }
+    // Finding 2 (ported for ESPHome 2026.7.2): the name string must outlive
+    // the entity - configure_entity_() (invoked internally by the 4-arg
+    // App.register_binary_sensor() overload) stores it as a non-owning
+    // StringRef. Heap-allocate and never free (matches ESPHome codegen's own
+    // lifetime assumption for a compile-time string literal baked into flash
+    // forever). RENAME-01 (13.1.1-01): object_id_hash is now explicitly
+    // PINNED (see the shared stable-hash helper near rehydrate_zone_registry_())
+    // from the fixed canonical name - intentionally NOT auto-derived from
+    // the (possibly custom) display name, so a rename never changes this
+    // zone's HA entity/history. device_class is intentionally left unset
+    // (entity_fields=0): 2026.7.2 device_class is a codegen-interned table
+    // index with no runtime string->index setter (D-2).
+    auto *name = new std::string("Zone " + std::to_string(zone_id) + " Presence");
+    auto *sensor = new binary_sensor::BinarySensor();
+    // D-02: visible to HA after next ListEntitiesRequest
+    App.register_binary_sensor(sensor, name->c_str(), fp2_stable_zone_object_id_hash_(zone_id), 0);
+    zone->set_presence_sensor(sensor);
+    this->zone_slot_cache_[zone_id] = zone;
+    // CR-01 fix (12-REVIEW iter2): first time this ID has ever been used
+    // this boot - append exactly once. zones_.reserve(32) in setup()
+    // guarantees this can never reallocate the buffer a concurrent
+    // httpd-task reader might be range-iterating.
+    zones_.push_back(zone);
+  }
+
+  // UART sequence - DEFINE first.
+  std::vector<uint8_t> payload;
+  payload.push_back(zone_id);
+  payload.insert(payload.end(), grid.begin(), grid.end());
+  enqueue_command_blob2_(AttrId::ZONE_MAP, payload);
+  pending_save_attr_ids_.push_back(AttrId::ZONE_MAP);
+
+  enqueue_command_(OpCode::WRITE, AttrId::ZONE_SENSITIVITY,
+                    (uint16_t)((zone_id << 8) | (sensitivity & 0xFF)));
+  pending_save_attr_ids_.push_back(AttrId::ZONE_SENSITIVITY);
+
+  if (zone_type >= 0) {
+    enqueue_command_(OpCode::WRITE, AttrId::DETECT_ZONE_TYPE,
+                      (uint16_t)((zone_id << 8) | ((uint8_t) zone_type & 0xFF)));
+    pending_save_attr_ids_.push_back(AttrId::DETECT_ZONE_TYPE);
+  }
+
+  enqueue_command_(OpCode::WRITE, AttrId::ZONE_CLOSE_AWAY_ENABLE, (uint16_t)((zone_id << 8) | 1));
+  pending_save_attr_ids_.push_back(AttrId::ZONE_CLOSE_AWAY_ENABLE);
+
+  // ACTIVATE last: rebuild the full 32-byte list from the now-updated
+  // zones_ - mirrors check_initialization_()'s activation-rebuild loop
+  // exactly (the single source of truth for "what is active now").
+  std::vector<uint8_t> activations(32, 0);
+  for (const auto &z : zones_) {
+    // CR-01 fix (12-REVIEW iter2): zones_ now retains removed zones as
+    // inactive entries rather than erasing them - skip them so a
+    // deactivated zone is never re-activated on the radar by this rebuild.
+    if (!z->active)
+      continue;
+    activations[z->id] = z->id;
+  }
+  enqueue_command_blob2_(AttrId::ZONE_ACTIVATION_LIST, activations);
+  pending_save_attr_ids_.push_back(AttrId::ZONE_ACTIVATION_LIST);
+}
+
+// RENAME-01 (13.1.1-01): rename a runtime zone's display name. Pure NVS
+// metadata mutation - deliberately does NOT open a save batch, push any
+// AttrId onto pending_save_attr_ids_, or touch
+// editor_save_queued_/save_batch_in_progress_, because a rename has no
+// radar write and must never appear as an in-flight save to the httpd
+// status poller (save_pending()). Runs on the main loop (the handler landing
+// in Plan 02 defers this call via App.scheduler.set_timeout, same
+// cross-task-safety discipline as add_zone_at_runtime()/
+// remove_zone_at_runtime()).
+//
+// NOTE (13.1.1-RESEARCH.md Open Question 2 / Assumption A2): this pinned
+// ESPHome build's EntityBase/BinarySensor exposes no public runtime setter
+// for an already-registered entity's name_ (a StringRef set once at
+// configure_entity_() time) - so the live HA-visible friendly name only
+// updates after the NEXT reboot's rehydrate_zone_registry_() re-reads this
+// NVS blob and re-registers with the new name. The /zones page gets
+// immediate feedback via json_get_map_data()'s "name" field instead (Task 2)
+// - it does not need to wait for a reboot.
+void FP2Component::rename_zone_at_runtime(uint8_t zone_id, const std::string &name) {
+  if (!this->is_runtime_zone(zone_id)) {
+    // Defensive - the handler landing in Plan 02 already 400s a compile-time
+    // zone_id synchronously, but this deferred entry point must never trust
+    // that guard alone.
+    ESP_LOGW(TAG, "rename_zone_at_runtime: zone_id %u is not a runtime zone", zone_id);
+    return;
+  }
+  FP2Zone *zone = this->zone_slot_cache_[zone_id];
+  // T-13.1.1-01: bounded copy of at most 31 chars + explicit NUL - name is
+  // already length/charset-validated by the httpd handler, but this helper
+  // must not rely on that alone for the fixed-size buffer write.
+  strncpy(zone->custom_name, name.c_str(), sizeof(zone->custom_name) - 1);
+  zone->custom_name[sizeof(zone->custom_name) - 1] = '\0';
+  this->save_zone_name_(zone_id, zone->custom_name);
+  ESP_LOGI(TAG, "Renamed runtime zone %u to \"%s\"", zone_id, zone->custom_name);
+}
+
+// ZONEMGMT-02 (12-02): remove an existing zone at runtime with zero YAML
+// edits or reflash. Deactivate-before-clear ordering (12-RESEARCH.md
+// Pattern 5): the rebuilt ZONE_ACTIVATION_LIST (with this ID zeroed) is
+// enqueued BEFORE the ZONE_MAP hygiene clear, so the radar stops treating
+// the ID as real before any grid data is touched.
+void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
+  // CR-01 fix (12-REVIEW): see add_zone_at_runtime()'s identical comment -
+  // must run first, before the not-found rejection below, so a rejected
+  // delete call also clears the flag handle_post_delete_ set synchronously.
+  this->editor_save_queued_ = false;
+  // WR-02 fix (12-REVIEW): open the batch for save_pending()'s cross-task
+  // read as the very FIRST statement (paired with the editor_save_queued_
+  // clear above), before the not-found rejection below.
+  this->save_batch_in_progress_ = true;
+  // CR-01 fix (12-REVIEW iter2): match only an *active* entry - a
+  // previously-removed ID's now-inactive FP2Zone* stays in zones_ (see
+  // below), so without the active check a double-remove would silently
+  // "succeed" a second time on the same already-inactive object instead of
+  // correctly reporting zone_id not found.
+  auto it = std::find_if(zones_.begin(), zones_.end(),
+                          [zone_id](FP2Zone *z) { return z->active && z->id == zone_id; });
+  if (it == zones_.end()) {
+    ESP_LOGW(TAG, "remove_zone_at_runtime: zone_id %u not found", zone_id);
+    save_failed_ = true;
+    save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " not found";
+    // WR-02 fix (12-REVIEW): a rejected request must leave save_pending()
+    // false, not permanently true (CR-01 wedge-avoidance precedent).
+    this->save_batch_in_progress_ = false;
+    return;
+  }
+
+  // WR-03 (12-06): reject deleting a compile-time (YAML-declared) zone -
+  // mirrors add_zone_at_runtime()'s CR-02 guard idiom. zone_id has already
+  // matched an active zones_ entry above, so zone_slot_cache_[zone_id] is
+  // safe to index here; a null entry means this ID was never tracked by
+  // rehydrate_zone_registry_() or this function's own reuse branch, i.e. it
+  // belongs to the compile-time set_zones() path. Without this guard the
+  // deactivation below would "succeed" from the UI's perspective, but the
+  // next boot's set_zones() call resurrects the zone anyway - reporting a
+  // deletion that silently does not persist.
+  if (this->zone_slot_cache_[zone_id] == nullptr) {
+    ESP_LOGW(TAG, "remove_zone_at_runtime: zone_id %u belongs to a compile-time zone", zone_id);
+    save_failed_ = true;
+    save_error_ = std::string("zone_id ") + std::to_string(zone_id) +
+                  " belongs to a compile-time zone and cannot be removed here";
+    this->save_batch_in_progress_ = false;
+    return;
+  }
+
+  ESP_LOGI(TAG, "Removing runtime zone %u", zone_id);
+  save_failed_ = false;
+  save_error_.clear();
+  pending_save_attr_ids_.clear();
+
+  FP2Zone *zone = *it;
+  // CR-01 fix (12-REVIEW iter2): deactivate in place FIRST (so the
+  // activation-list rebuild below reads the post-removal membership,
+  // preserving Pattern 5's ordering) instead of zones_.erase(it). erase()
+  // shifts every subsequent element's storage in place, which is unsafe to
+  // do while the httpd task may be concurrently range-iterating this same
+  // vector in handle_get_zones_()/handle_get_free_slots_() with no lock.
+  // The FP2Zone object stays alive and in zones_ (already cached in
+  // zone_slot_cache_ for reuse - Pitfall 4), just marked inactive; every
+  // reader of zones_ must skip inactive entries.
+  zone->active = false;
+
+  // UART sequence - DEACTIVATE first.
+  std::vector<uint8_t> activations(32, 0);
+  for (const auto &z : zones_) {
+    if (!z->active)
+      continue;
+    activations[z->id] = z->id;
+  }
+  enqueue_command_blob2_(AttrId::ZONE_ACTIVATION_LIST, activations);
+  pending_save_attr_ids_.push_back(AttrId::ZONE_ACTIVATION_LIST);
+
+  // CLEAR second (hygiene) - not load-bearing for correctness (the "define"
+  // step of a future add always rewrites this ID's ZONE_MAP fresh), but
+  // avoids leaving a real grid sitting at a deactivated ID.
+  std::vector<uint8_t> empty_zone(41, 0x00);
+  empty_zone[0] = zone_id;
+  enqueue_command_blob2_(AttrId::ZONE_MAP, empty_zone);
+  pending_save_attr_ids_.push_back(AttrId::ZONE_MAP);
+
+  // HA entity: mark unavailable + hidden from the next ListEntitiesRequest
+  // (D-03). Do NOT delete the FP2Zone/BinarySensor objects - ESPHome has no
+  // App.unregister_binary_sensor() and a freed-but-referenced pointer is a
+  // use-after-free the API iterator will eventually dereference (Pitfall 4).
+  // Keep them alive in zone_slot_cache_ for reuse on a future re-add.
+  if (zone->presence_sensor != nullptr) {
+    zone->presence_sensor->invalidate_state();
+    zone->presence_sensor->set_internal(true);
+  }
+  if (zone->motion_sensor != nullptr) {
+    zone->motion_sensor->invalidate_state();
+    zone->motion_sensor->set_internal(true);
+  }
+
+  // NVS: clear this ID's membership bit and persist (syncs). Leave the
+  // per-ID FP2ZoneOverride content in place - harmless dead data only ever
+  // read for IDs currently in zones_, and a future add always rewrites it
+  // fresh; no explicit wipe is load-bearing for correctness.
+  FP2ZoneRegistryMeta meta;
+  uint32_t active_mask = load_zone_registry_meta_(&meta) ? meta.active_mask : 0;
+  active_mask &= ~(1u << zone_id);
+  save_zone_registry_meta_(active_mask);
 }
 
 // RUN-04 (09-01/09-03): live single-register Global Zone presence_sensitivity
@@ -468,8 +1057,18 @@ void FP2Component::save_global_zone_to_sensor(uint8_t sensitivity) {
   ESP_LOGI(TAG, "Queueing Global Zone presence_sensitivity save = %u", sensitivity);
   save_failed_ = false;
   save_error_.clear();
+  // CR-01 fix (12-REVIEW #2): open the batch for save_pending()'s cross-task read.
+  save_batch_in_progress_ = true;
   enqueue_command_(OpCode::WRITE, AttrId::PRESENCE_DETECT_SENSITIVITY, sensitivity);
   pending_save_attr_ids_.push_back(AttrId::PRESENCE_DETECT_SENSITIVITY);
+
+  // CR-01 (12-06): mirror the just-saved value into the live member so a
+  // later force_detection_config() (fired independently, e.g. from a
+  // diagnostic action) re-writes THIS value to the radar instead of
+  // silently reverting to whatever was in global_presence_sensitivity_
+  // before this save. Only on the all-valid path - a rejected input above
+  // returns before reaching here and never touches the mirror.
+  this->global_presence_sensitivity_ = sensitivity;
 
   // RUN-02 (09-03): persist to NVS so this survives a host reboot without a
   // reflash. Only reached on the all-valid path (after the enqueue above) -
@@ -497,12 +1096,21 @@ static int fp2_hex_nibble_(char c) {
 // value survives a host reboot without a reflash.
 void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_hex,
                                         uint8_t sensitivity, int zone_type) {
+  // WR-02 fix (12-REVIEW): open the batch for save_pending()'s cross-task
+  // read as the very FIRST statement, before check (a) below - covers both
+  // the direct-caller path and the save_zone_from_editor() delegation path
+  // (idempotent with that function's own earlier set).
+  this->save_batch_in_progress_ = true;
   // (a) zone_id must match an actually-compiled zone (Pitfall 2) - a linear
   // search of zones_, NOT a bare 0-31 protocol-range check. zones_ is tiny
   // (0-2 entries in practice), so this is cheap.
+  // CR-01 fix (12-REVIEW iter2): a runtime-removed zone stays in zones_ as
+  // an inactive entry (never erased - see remove_zone_at_runtime()), so
+  // this membership check must require active, or a save could be accepted
+  // for a zone the user just removed.
   bool zone_found = false;
   for (const auto &zone : zones_) {
-    if (zone->id == zone_id) {
+    if (zone->active && zone->id == zone_id) {
       zone_found = true;
       break;
     }
@@ -511,6 +1119,9 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
     ESP_LOGW(TAG, "save_zone_to_sensor: zone_id %u is not a compiled zone", zone_id);
     save_failed_ = true;
     save_error_ = std::string("zone_id ") + std::to_string(zone_id) + " is not a compiled zone";
+    // WR-02 fix (12-REVIEW): a rejected request must leave save_pending()
+    // false, not permanently true (CR-01 wedge-avoidance precedent).
+    this->save_batch_in_progress_ = false;
     return;
   }
 
@@ -520,16 +1131,18 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
     save_failed_ = true;
     save_error_ = std::string("invalid sensitivity ") + std::to_string(sensitivity) +
                   " (must be 1-3)";
+    this->save_batch_in_progress_ = false;
     return;
   }
 
   // (c) zone_type must be -1 (sentinel = not set) or a ZONE_TYPES value.
-  if (zone_type != -1 && zone_type != 0 && zone_type != 2 && zone_type != 10 &&
-      zone_type != 11 && zone_type != 13 && zone_type != 14 && zone_type != 15 &&
-      zone_type != 23 && zone_type != 36) {
+  // WR-02 fix (12-REVIEW #2): allowlist factored into fp2_is_valid_zone_type_()
+  // so this and add_zone_at_runtime()'s identical check can't drift apart.
+  if (!fp2_is_valid_zone_type_(zone_type)) {
     ESP_LOGW(TAG, "save_zone_to_sensor: invalid zone_type %d", zone_type);
     save_failed_ = true;
     save_error_ = std::string("invalid zone_type ") + std::to_string(zone_type);
+    this->save_batch_in_progress_ = false;
     return;
   }
 
@@ -540,6 +1153,7 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
     save_failed_ = true;
     save_error_ = std::string("grid_hex must be exactly 80 hex characters, got ") +
                   std::to_string(grid_hex.size());
+    this->save_batch_in_progress_ = false;
     return;
   }
   GridMap grid{};
@@ -550,12 +1164,14 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
       ESP_LOGW(TAG, "save_zone_to_sensor: grid_hex contains a non-hex character");
       save_failed_ = true;
       save_error_ = "grid_hex contains a non-hex character";
+      this->save_batch_in_progress_ = false;
       return;
     }
     grid[i] = (uint8_t)((hi << 4) | lo);
   }
 
-  // All valid - clear any prior failure state and start a fresh save batch.
+  // All valid - clear any prior failure state. save_batch_in_progress_ was
+  // already opened as this function's first statement (WR-02 fix).
   ESP_LOGI(TAG, "Queueing zone %u save (sensitivity=%u, zone_type=%d)", zone_id, sensitivity,
            zone_type);
   save_failed_ = false;
@@ -593,6 +1209,90 @@ void FP2Component::save_zone_to_sensor(uint8_t zone_id, const std::string &grid_
   // reflash. Only reached on the all-valid path (after all enqueues above) -
   // a rejected input never persists.
   save_zone_override_(zone_id, grid, sensitivity, zone_type);
+
+  // WR-01 (12-06): mirror the just-saved grid/sensitivity/zone_type into the
+  // matched in-memory FP2Zone and re-publish its map_sensor, so GET
+  // /api/zones and the map_sensor text sensor reflect this save immediately
+  // instead of showing pre-save data until the next reboot re-hydrates from
+  // NVS. Only on the all-valid path (after the NVS persist above) - every
+  // rejected/early-return branch above returns before reaching here.
+  for (auto *zone : zones_) {
+    if (zone->active && zone->id == zone_id) {
+      zone->grid = grid;
+      zone->sensitivity = sensitivity;
+      if (zone_type >= 0) {
+        zone->set_zone_type((uint8_t) zone_type);
+      } else {
+        zone->has_zone_type = false;
+      }
+      if (zone->map_sensor != nullptr) {
+        zone->map_sensor->publish_state(grid_to_hex_card_format(zone->grid));
+      }
+      break;
+    }
+  }
+}
+
+// WEBUI-02 (11-03): server-side grid lookup for the device-hosted /zones
+// editor's POST /api/zones/save handler. The editor never sends a grid over
+// the wire (D-01) - only zone_id/sensitivity/zone_type are parsed from the
+// request, and this method resolves the already-compiled zone's 40-byte
+// grid by zone_id before delegating to save_zone_to_sensor(), which performs
+// every validation (zone_id membership, sensitivity range, zone_type
+// allowlist, grid_hex length/charset) unchanged (V5 reuse - no new
+// validation added here).
+// WEBUI-04 (13-01): grid_hex is now an optional trailing param (default ""
+// lives only in the header declaration, not repeated here). When the caller
+// (the /zones painting UI, via handle_post_save_()) supplies a non-empty
+// client-painted grid, it is already the canonical 80-char hex form and is
+// used as-is - no re-encoding. When empty (every pre-existing caller), the
+// server-side zones_ lookup below runs unchanged.
+void FP2Component::save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type,
+                                          const std::string &grid_hex) {
+  // CR-01 fix (11-03): hand off pending-state ownership to
+  // pending_save_attr_ids_/save_failed_ (set below, inside
+  // save_zone_to_sensor()) now that this is actually running on the main
+  // loop. There is no gap: save_pending() ORs both fields, and this clear
+  // happens immediately before the call that populates the other field.
+  this->editor_save_queued_ = false;
+  // WR-02 fix (12-REVIEW): open the batch for save_pending()'s cross-task
+  // read as the very FIRST statement, before the grid-extraction loop below
+  // - that loop window (and the delegation to save_zone_to_sensor()) must
+  // never observe/leave a stale pending:false gap. save_zone_to_sensor()
+  // also sets this as its own first statement (idempotent) since it has
+  // other, direct callers too.
+  this->save_batch_in_progress_ = true;
+  std::string hex = grid_hex;
+  if (hex.empty()) {
+    // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) entries -
+    // save_zone_to_sensor()'s own (a) check below already rejects a removed
+    // zone_id, so leaving hex empty for it is correct either way, but
+    // matching the active-only convention avoids reading a stale grid off a
+    // hidden/removed zone.
+    for (const auto &zone : zones_) {
+      if (zone->active && zone->id == zone_id) {
+        // Build all 40 bytes as an 80-char lowercase hex string. Deliberately
+        // NOT grid_to_hex_card_format() - that helper emits only 56 chars (14
+        // rows) for the /zones list view's display, which would fail
+        // save_zone_to_sensor()'s exactly-80-character length check.
+        char byte_hex[3];
+        for (size_t i = 0; i < zone->grid.size(); i++) {
+          snprintf(byte_hex, sizeof(byte_hex), "%02x", zone->grid[i]);
+          hex += byte_hex;
+        }
+        break;
+      }
+    }
+    // If zone_id isn't found, hex stays empty - save_zone_to_sensor()
+    // rejects unknown zone_id first (its own (a) check), so an empty hex
+    // never reaches the (d) length check.
+  }
+  // WEBUI-04: when a non-empty client grid was supplied above, it is used
+  // directly here without re-encoding. Its hex-charset validity ((d) check)
+  // is deliberately delegated to save_zone_to_sensor() below, not duplicated
+  // here - see 13-PATTERNS.md "Validation delegate to reuse, do not
+  // duplicate".
+  this->save_zone_to_sensor(zone_id, hex, sensitivity, zone_type);
 }
 
 void FP2LocationSwitch::write_state(bool state) {
@@ -669,12 +1369,43 @@ void FP2Component::loop() {
     }
   }
 
+  // D-04 (11-01): poll the project-owned /zones/events SSE source and toggle
+  // location reporting on the connect/disconnect edge (not every tick).
+  // loop() must run first - it reaps dead sessions, which is required before
+  // empty()/count() reflect reality (Pitfall 4).
+  if (this->zone_editor_sse_ != nullptr) {
+    this->zone_editor_sse_->loop();
+    bool has_clients = !this->zone_editor_sse_->empty();
+    if (has_clients && !this->sse_reporting_active_) {
+      // WR-01 fix: only claim ownership of turning reporting off later if
+      // this session is the one turning it on now. If it was already on
+      // (e.g. a user enabled "Report Targets" in HA), leave that owner's
+      // intent alone on disconnect.
+      this->sse_forced_reporting_on_ = !this->location_reporting_active_;
+      if (this->sse_forced_reporting_on_) {
+        this->set_location_reporting_enabled(true); // D-04 connect
+      }
+      this->sse_reporting_active_ = true;
+    } else if (!has_clients && this->sse_reporting_active_) {
+      if (this->sse_forced_reporting_on_) {
+        this->set_location_reporting_enabled(false); // D-04 disconnect
+        this->sse_forced_reporting_on_ = false;
+      }
+      this->sse_reporting_active_ = false;
+    }
+  }
+
   check_initialization_();
   process_command_queue_();
 
   // Release zone motion sensors once their debounce timeout expires.
+  // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) zones -
+  // they're already hidden/invalidated by remove_zone_at_runtime() and
+  // should not have their debounce state ticked further.
   uint32_t now = millis();
   for (auto &z : zones_) {
+    if (!z->active)
+      continue;
     z->tick_motion(now);
   }
 }
@@ -767,6 +1498,12 @@ void FP2Component::check_initialization_() {
     // 3. Zones
     std::vector<uint8_t> activations(32, 0);
     for (const auto &zone : zones_) {
+      // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) zones -
+      // possible in the rare case a remove happened before the very first
+      // radar frame arrived (this whole block only ever runs once, gated by
+      // init_done_). zones_ never erases a removed zone anymore.
+      if (!zone->active)
+        continue;
       // RUN-02 (09-03): resolve grid/sensitivity/zone_type into LOCAL
       // variables from a saved NVS override, if present, BEFORE building any
       // of this zone's register payloads below (09-RESEARCH.md Pitfall 4 -
@@ -810,6 +1547,10 @@ void FP2Component::check_initialization_() {
     enqueue_command_blob2_(AttrId::ZONE_ACTIVATION_LIST, activations);
 
     for (const auto &zone : zones_) {
+        // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) zones -
+        // see the identical guard on the activation-list loop above.
+        if (!zone->active)
+          continue;
         // Close/Away Enable default?
         // Trace: 0x0153 Zone Close Away Enable.
         // We can enable it by default for now or add config options later.
@@ -853,7 +1594,11 @@ void FP2Component::check_initialization_() {
     }
 
     // 6. Publish zone map sensors
+    // CR-01 fix (12-REVIEW iter2): skip inactive (runtime-removed) zones -
+    // see the identical guard above.
     for (const auto &zone : zones_) {
+      if (!zone->active)
+        continue;
       if (zone->map_sensor != nullptr) {
         zone->map_sensor->publish_state(grid_to_hex_card_format(zone->grid));
       }
@@ -863,6 +1608,8 @@ void FP2Component::check_initialization_() {
     // After radar reset, we know there is no occupancy/motion detected yet
     ESP_LOGI(TAG, "Publishing initial zone states (no presence/motion after reset)");
     for (const auto &zone : zones_) {
+      if (!zone->active)
+        continue;
       zone->publish_presence(false);
       zone->reset_motion();
     }
@@ -896,6 +1643,9 @@ void FP2Component::process_command_queue_() {
             save_failed_ = true;
             save_error_ = std::string("timed out writing ") + attr_id_to_string_(cmd.attr_id);
             pending_save_attr_ids_.clear();
+            // CR-01 fix (12-REVIEW #2): close the batch - save_error_ above is
+            // now safe for the httpd task to read via save_error().
+            save_batch_in_progress_ = false;
           }
           command_queue_.pop_front();
           waiting_for_ack_attr_id_ = AttrId::INVALID;
@@ -1186,6 +1936,12 @@ void FP2Component::handle_ack_(AttrId attr_id) {
     pending_save_attr_ids_.erase(
         std::remove(pending_save_attr_ids_.begin(), pending_save_attr_ids_.end(), attr_id),
         pending_save_attr_ids_.end());
+    // CR-01 fix (12-REVIEW #2): the batch drained to empty with every write
+    // ACKed - close it so save_pending()/save_error() are safe for the httpd
+    // task to read (save_failed_ is still false on this success path).
+    if (pending_save_attr_ids_.empty()) {
+      save_batch_in_progress_ = false;
+    }
   } else {
     ESP_LOGW(TAG, "Unexpected ACK 0x%04X (Waiting for 0x%04X)", attr_id,
              (uint16_t) waiting_for_ack_attr_id_);
@@ -1242,8 +1998,11 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             // Exit/Interference do not.
             if (event_type & 0x0B) {
               uint32_t now = millis();
+              // WR-01 fix (12-REVIEW): require z->active so a stray report
+              // for a removed zone (ACK-pending window) never mutates a
+              // retired FP2Zone's motion state.
               for (auto &z : zones_) {
-                if (z->id == zone_id) {
+                if (z->active && z->id == zone_id) {
                   z->note_motion_event(now);
                   break;
                 }
@@ -1299,14 +2058,25 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             uint8_t state = payload[4];
             ESP_LOGD(TAG, "Zone Presence Report: Zone %d = %s", zone_id, state ? "ON" : "OFF");
 
+            // WR-01 fix (12-REVIEW): require z->active so a stray report for
+            // a removed zone (ACK-pending window) never mutates a retired
+            // FP2Zone's presence state.
             for (auto &z : zones_) {
-                if (z->id == zone_id) {
+                if (z->active && z->id == zone_id) {
                     z->publish_presence(state == 1);
                     break;
                 }
             }
             break;
         }
+        // WR-04 fix (12-REVIEW): explicit break on the malformed-payload path
+        // so execution never falls through into ZONE_PEOPLE_NUMBER's case
+        // body below (attr_id is still ZONE_PRESENCE here, so the fallthrough
+        // would re-evaluate the same failing guard and mislabel a malformed
+        // ZONE_PRESENCE report as "zone_people_number_malformed" in the
+        // debug sensor/log).
+        publish_radar_debug_("zone_presence_malformed", attr_id, payload);
+        break;
 
     case AttrId::ZONE_PEOPLE_NUMBER:  // Zone People Count (SENSE-01, 08-01)
         // Payload: [SubID 2B] [Type 0x01(UINT16)] [ValH] [ValL]
@@ -1316,8 +2086,11 @@ void FP2Component::handle_report_(AttrId attr_id, const std::vector<uint8_t> &pa
             uint8_t count = payload[4];
             ESP_LOGD(TAG, "Zone People Count Report: Zone %d = %u", zone_id, count);
 
+            // WR-01 fix (12-REVIEW): require z->active so a stray report for
+            // a removed zone (ACK-pending window) never mutates a retired
+            // FP2Zone's people-count state.
             for (auto &z : zones_) {
-                if (z->id == zone_id) {
+                if (z->active && z->id == zone_id) {
                     z->publish_people_count(count);
                     break;
                 }
@@ -1458,6 +2231,14 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
 
   if (this->target_tracking_sensor_ != nullptr) {
     this->target_tracking_sensor_->publish_state(base64_str);
+  }
+
+  // WEBUI-03 (11-01): push the SAME base64 payload to the /zones live overlay
+  // over the dedicated SSE source, if a client is connected. No re-encoding -
+  // byte-for-byte parity with the target_tracking text sensor above so
+  // card.js's decodeTargetsBase64() works unchanged on the client side.
+  if (this->zone_editor_sse_ != nullptr) {
+    this->zone_editor_sse_->try_send_nodefer(base64_str.c_str(), base64_str.size(), "target_update");
   }
 
   // Derived numeric sensors (throttled to ~1 Hz; the raw stream is 10-20 Hz).
@@ -1934,17 +2715,73 @@ void FP2Component::json_get_map_data(JsonObject root) {
   }
 
   // Zones
-  if (!zones_.empty()) {
+  // CR-01 fix (12-REVIEW iter2): zones_ now retains removed zones as
+  // inactive entries (never erased - see remove_zone_at_runtime()), so
+  // "any zones to list" must check for an active entry, not just a
+  // non-empty vector, and the loop below must skip inactive entries.
+  bool has_active_zone = false;
+  for (FP2Zone *zone : zones_) {
+    if (zone->active) {
+      has_active_zone = true;
+      break;
+    }
+  }
+  if (has_active_zone) {
     JsonArray zones_array = root["zones"].to<JsonArray>();
     for (FP2Zone *zone : zones_) {
+      if (!zone->active)
+        continue;
       JsonObject zone_obj = zones_array.add<JsonObject>();
+      // WEBUI-01 (11-01): the device-hosted /zones list view needs a stable
+      // zone_id to submit on Save (D-02) - card.js never needed this because
+      // it only ever edited zones it had drawn itself.
+      zone_obj["id"] = zone->id;
       zone_obj["sensitivity"] = zone->sensitivity;
       zone_obj["grid"] = grid_to_hex_card_format(zone->grid);
+      if (zone->has_zone_type) {
+        // WEBUI-01 (11-01): pre-populate the list view's zone_type select
+        // (D-02). Conditional emit mirrors the presence_sensor style below -
+        // omitted entirely when the zone has no configured zone_type.
+        zone_obj["zone_type"] = zone->zone_type;
+      }
       if (zone->presence_sensor != nullptr) {
         zone_obj["presence_sensor"] = zone->presence_sensor->get_name().c_str();
       }
+      // RENAME-01 (13.1.1-01): emit the custom display name when set so the
+      // /zones page reflects a rename immediately, without waiting for the
+      // next reboot's rehydrate to update the HA entity's own name_ (no
+      // public runtime setter exists in this pinned build - see
+      // rename_zone_at_runtime()'s comment). Omitted entirely when unset,
+      // matching the presence_sensor conditional-emit style above.
+      if (zone->custom_name[0] != '\0') {
+        zone_obj["name"] = zone->custom_name;
+      }
     }
   }
+}
+
+// ZONEMGMT-01 (12-02): free-slot computation for the Add-Zone dropdown (D-01)
+// and the D-07 capacity-full UI state. Scans the LIVE zones_ union (compile-
+// time YAML zones + runtime-added zones) - never the NVS registry's
+// active_mask alone (Pitfall 3) - so a runtime add can never collide with a
+// compile-time zone's ID.
+void FP2Component::json_get_free_slots(JsonObject root) {
+  bool used[32] = {false};
+  for (const auto &zone : zones_) {
+    // CR-01 fix (12-REVIEW iter2): an inactive (removed) entry's ID must
+    // show up as free again - zones_ never erases a removed zone anymore.
+    if (zone->active && zone->id < 32) {
+      used[zone->id] = true;
+    }
+  }
+
+  JsonArray free_slots = root["free_slots"].to<JsonArray>();
+  for (uint8_t id = 0; id < 32; id++) {
+    if (!used[id]) {
+      free_slots.add(id);
+    }
+  }
+  root["full"] = (free_slots.size() == 0);
 }
 
 } // namespace aqara_fp2

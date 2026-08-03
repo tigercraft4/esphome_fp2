@@ -1,5 +1,9 @@
 esphome:
   name: fp2-sala
+  # zones_page_bundle.h / zones_web_handler.h now live in
+  # components/aqara_fp2/ (moved 2026-07-28) so the git external_component
+  # fetch below pulls them automatically — no manual `includes:`/file copy
+  # needed for a fresh HA/ESPHome-addon install.
 
 esp32:
   board: esp32-solo1
@@ -15,11 +19,13 @@ esp32:
 
 # RUN-02/RUN-04 (09-03): a saved zone/Global-Zone override is a rare,
 # deliberate user action, not a high-frequency write - commit it to flash
-# promptly (flash_write_interval: 0s) so it survives a quick hard
-# power-cycle right after saving, not just a graceful reboot. The extra
-# flash wear is negligible given how infrequently saves happen.
+# as promptly as ESPHome allows (1ms - 0s is rejected, coerced with a
+# WARNING since a literal 0ms schedule would spin the main loop and trip
+# the watchdog) so it survives a quick hard power-cycle right after saving,
+# not just a graceful reboot. The extra flash wear is negligible given how
+# infrequently saves happen.
 preferences:
-  flash_write_interval: 0s
+  flash_write_interval: 1ms
 
 wifi:
   ssid: !secret wifi_ssid
@@ -33,9 +39,18 @@ captive_portal:
 # Local diagnostics page on the device IP (http://<device-ip>/).
 # version 2 is embedded/offline-friendly and light on the SOLO-1.
 # Add an `auth:` block if you want to password-protect it.
+#
+# WEBUI-01/02/03 (11-04): id/web_server_base_id are explicit so aqara_fp2's
+# optional web_server_id/web_server_base_id keys below can reference this
+# same instance to register the device-hosted zone editor's routes.
 web_server:
+  id: main_ws
   port: 80
   version: 2
+  web_server_base_id: base_ws
+
+web_server_base:
+  id: base_ws
 
 api:
   encryption:
@@ -152,7 +167,11 @@ external_components:
   - source:
       type: git
       url: https://github.com/tigercraft4/esphome_fp2
-      ref: main
+      # TEMPORARY (Phase 13 hardware validation, 2026-07-28): points at the
+      # v1.2 feature branch instead of main because main doesn't have
+      # Phase 10-13 yet. Revert to `ref: main` once this branch is merged.
+      ref: gsd/v1.2-device-hosted-web-ui-live-zone-registry
+    refresh: 0s
     components: [aqara_fp2, aqara_fp2_accel]
 
 aqara_fp2_accel:
@@ -161,6 +180,10 @@ aqara_fp2_accel:
 aqara_fp2:
   id: fp2
   accel: fp2_accel
+  # WEBUI-01/02 (11-04): opt into the device-hosted zone editor by referencing
+  # the web_server/web_server_base declared above.
+  web_server_id: main_ws
+  web_server_base_id: base_ws
   uart_id: uart_bus
   radar_reset_pin: GPIO13
   mounting_position: left_corner
@@ -178,6 +201,9 @@ aqara_fp2:
 
   location_report_switch:
     name: "Report Targets"
+
+  operating_mode:
+    name: "Operating Mode"
 
   interference_grid: |-
     . . . . . . . . . . . . . .
@@ -201,6 +227,30 @@ aqara_fp2:
       name: "Global Presence"
     motion:
       name: "Global Motion"
+
+  fall_detected:
+    name: "Fall Detected"
+
+  zones:
+    - id: test_zone
+      grid: |-
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+        X X X X X X X X X X X X X X
+      presence_sensitivity: medium
+      presence:
+        name: "Geral"
 
   radar_software_version:
     name: "Radar Software Version"
@@ -236,6 +286,72 @@ sensor:
     name: "Illuminance"
     address: 0x44
     update_interval: 30s
+
+  # ============================================================================
+  # TEMPORARY (Phase 13 SC3 soak instrumentation, D-10 lifecycle) - START
+  # Added for the Roadmap SC3 multi-hour RAM soak (executed on real hardware in
+  # Plan 13-06). Raw ESP-IDF heap-caps calls, NOT ESPHome's built-in debug:
+  # min_free/fragmentation sensor keys - those require an ESPHome version the
+  # pinned esphome>=2025.12.4 release predates (Phase 10 Pitfall 1, still
+  # applicable). Read-only telemetry only - no control logic depends on these.
+  # Remove this entire block (these 3 sensors + the matching interval: entry
+  # below) once the operator has recorded the go/no-go soak verdict; do NOT
+  # remove before then (see .planning/phases/10-architecture-validation-spike/
+  # 10-SOAK-VERDICT.md for the removal-timing precedent this follows).
+  # ============================================================================
+  - platform: template
+    name: "Soak Free Heap"
+    id: soak_free_heap
+    entity_category: diagnostic
+    unit_of_measurement: "B"
+    icon: "mdi:memory"
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      return (float) heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+
+  - platform: template
+    name: "Soak Min Free Heap"
+    id: soak_min_free_heap
+    entity_category: diagnostic
+    unit_of_measurement: "B"
+    icon: "mdi:memory"
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      return (float) heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+
+  - platform: template
+    name: "Soak Fragmentation"
+    id: soak_fragmentation
+    entity_category: diagnostic
+    unit_of_measurement: "%"
+    icon: "mdi:memory"
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: |-
+      size_t free_size = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+      if (free_size == 0) {
+        return 0.0f;
+      }
+      size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+      return 100.0f - (100.0f * (float) largest_block / (float) free_size);
+  # TEMPORARY (Phase 13 SC3 soak instrumentation, D-10 lifecycle) - END sensors
+  # ============================================================================
+
+# TEMPORARY (Phase 13 SC3 soak instrumentation, D-10 lifecycle): 30s greppable
+# log dump ("soak_heap" tag) for scripts/soak_summary.sh's soft-signal parsing
+# (declining free heap / rising fragmentation trend over the run), mirroring
+# Phase 10's spike_soak pattern (git show ec0f661:fp2-sala.yaml). Independent
+# of the logger: level so it survives even if it's raised above INFO for the
+# soak. Remove alongside the 3 sensors above once the verdict is recorded.
+interval:
+  - interval: 30s
+    then:
+      - lambda: |-
+          ESP_LOGI("soak_heap", "free=%.0f min_free=%.0f frag=%.1f",
+                   id(soak_free_heap).state, id(soak_min_free_heap).state,
+                   id(soak_fragmentation).state);
 
 binary_sensor:
   - platform: gpio

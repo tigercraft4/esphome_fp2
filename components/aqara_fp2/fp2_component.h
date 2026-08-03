@@ -7,6 +7,13 @@
 #include "esphome/components/socket/socket.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
+// WEBUI-03 (11-01): dedicated SSE overlay member (zone_editor_sse_) for the
+// device-hosted zone editor's live target-tracking view (D-04).
+#include "esphome/components/web_server_idf/web_server_idf.h"
+// WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null unless
+// web_server_id/web_server_base_id set in YAML.
+#include "esphome/components/web_server_base/web_server_base.h"
+#include "esphome/components/web_server/web_server.h"
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 
@@ -111,11 +118,26 @@ struct FP2Zone : public Component {
   esphome::sensor::Sensor *people_count_sensor{nullptr};
   GridMap grid;
   uint8_t sensitivity; // 1=Low, 2=Med, 3=High
+  // RENAME-01 (13.1.1-01): runtime-zone custom display name, persisted to a
+  // SEPARATE NVS blob (FP2ZoneName, see below) - NOT part of FP2ZoneOverride.
+  // Plain fixed-size char buffer (POD, zero-initialized) rather than
+  // std::string: json_get_map_data() can be invoked cross-task (httpd task
+  // reading FP2Component state) and a std::string's possible SSO/heap
+  // reallocation is not safe to read concurrently with a main-loop writer;
+  // a fixed char[32] read is a benign torn/stale read at worst. Empty first
+  // byte ('\0') means "no custom name - use the canonical default".
+  char custom_name[32]{};
   uint32_t motion_timeout_ms{5000};
   uint32_t last_motion_millis{0};
   bool motion_active{false};
   uint8_t zone_type{0};
   bool has_zone_type{false};
+  // CR-01 fix (12-REVIEW iter2): true unless removed via remove_zone_at_runtime().
+  // zones_ never erases an FP2Zone* once constructed (see that function's
+  // comment) - inactive entries stay in the vector, hidden, so every read of
+  // zones_ (including the httpd task's GET /api/zones and /api/zones/free-slots)
+  // must skip entries where active is false.
+  bool active{true};
 };
 
 class FP2Component;
@@ -278,6 +300,50 @@ struct FP2GlobalZoneOverride {
 } __attribute__((packed));
 
 static const uint32_t FP2_OVERRIDE_VERSION = 1;
+
+// RENAME-01 (13.1.1-01): a runtime zone's custom display name, persisted to
+// a DISTINCT, separately-versioned NVS blob (key "fp2_zone_name_<id>") -
+// deliberately NOT a new field on FP2ZoneOverride. Adding a field to
+// FP2ZoneOverride would change its packed byte layout and force
+// FP2_OVERRIDE_VERSION to be bumped, which load_zone_override_() treats a
+// mismatch of as "no override" - silently resetting every already-persisted
+// zone override (grid/sensitivity/zone_type) on the real device to compiled
+// defaults on the very next flash (13.1.1-RESEARCH.md Pitfall 2). Keeping
+// the name in its own blob with its own FP2_ZONE_NAME_VERSION means adding
+// (or ever changing) the name schema can never invalidate an existing
+// FP2ZoneOverride. FP2_OVERRIDE_VERSION above MUST stay 1.
+struct FP2ZoneName {
+  uint32_t version;
+  char name[32];
+} __attribute__((packed));
+
+static const uint32_t FP2_ZONE_NAME_VERSION = 1;
+
+// ZONEMGMT-03 (12-01): fixed 32-slot NVS-backed registry MEMBERSHIP record -
+// which zone IDs (0-31) are currently runtime-registry-managed. Distinct
+// from FP2ZoneOverride (which stores a slot's *content*): this stores which
+// slots exist at all. Same packed-struct + versioned-key idiom as
+// FP2ZoneOverride/FP2GlobalZoneOverride above, but a DISTINCT version
+// constant (FP2_ZONE_REGISTRY_VERSION) - do not reuse FP2_OVERRIDE_VERSION,
+// this is a separate versioned blob (12-RESEARCH.md Pattern 2).
+struct FP2ZoneRegistryMeta {
+  uint32_t version;
+  uint32_t active_mask;  // bit N set = zone ID N is a runtime-registry-managed slot
+} __attribute__((packed));
+
+static const uint32_t FP2_ZONE_REGISTRY_VERSION = 1;
+
+// D-04: default content for a newly-created runtime zone - a full 14x14
+// active detection area. 14 repetitions of the byte pair 0x3F,0xFF (rows
+// 0-13, the 14x14 active area per parse_ascii_grid()'s offset_col=2
+// mapping) followed by 12 zero bytes (rows 14-19, outside the 14x14 active
+// area). Byte-verified against this project's own compiled test_zone
+// (12-RESEARCH.md Code Example 1).
+static const GridMap FULL_ACTIVE_GRID = {
+  0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF,
+  0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
 
 class FP2LocationSwitch : public switch_::Switch {
 public:
@@ -467,6 +533,24 @@ public:
       fp2_accel_ = accel;
   }
 
+  // WEBUI-03 (11-01): register the project-owned /zones/events SSE source
+  // (constructed and add_handler()'d from fp2-sala.yaml's on_boot lambda,
+  // Plan 04). Nullptr-safe by construction - loop() and the push site both
+  // guard on zone_editor_sse_ != nullptr, so the component works unchanged
+  // if this is never called.
+  void set_zone_editor_sse(esphome::web_server_idf::AsyncEventSource *sse) {
+      this->zone_editor_sse_.reset(sse);
+  }
+
+  // WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null
+  // unless web_server_id/web_server_base_id set in YAML.
+  void set_web_server_base(esphome::web_server_base::WebServerBase *base) {
+      this->web_server_base_ = base;
+  }
+  void set_web_server(esphome::web_server::WebServer *ws) {
+      this->web_server_ = ws;
+  }
+
   void set_location_reporting_enabled(bool enabled);
   void force_detection_config();
   void read_detection_config();
@@ -511,11 +595,81 @@ public:
   // without a reflash.
   void save_zone_to_sensor(uint8_t zone_id, const std::string &grid_hex, uint8_t sensitivity,
                             int zone_type);
+  // WEBUI-02 (11-03): device-hosted /zones editor entry point. Looks up the
+  // already-compiled zone's 40-byte grid server-side by zone_id and forwards
+  // it to save_zone_to_sensor() - the editor's HTTP handler never sends a
+  // grid over the wire (D-01), so there is nothing to trust or re-validate
+  // from the client beyond zone_id/sensitivity/zone_type, which
+  // save_zone_to_sensor() already fully validates (V5).
+  // WEBUI-04 (13-01): trailing optional grid_hex param - when the caller
+  // supplies a non-empty client-painted grid (already canonical 80-char
+  // hex), it is used directly instead of the server-side zones_ lookup
+  // below. Default lives only here (header declaration); every existing
+  // 3-arg call site is source-compatible and unchanged.
+  void save_zone_from_editor(uint8_t zone_id, uint8_t sensitivity, int zone_type,
+                              const std::string &grid_hex = "");
+  // ZONEMGMT-01/02 (12-01): public surface for the live zone registry -
+  // definitions land in Plan 02. Declared here now so the class surface is
+  // stable for this plan's rehydrate_zone_registry_() and Plan 02's HTTP
+  // handler wiring alike.
+  void add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int zone_type);
+  void remove_zone_at_runtime(uint8_t zone_id);
+  // RENAME-01 (13.1.1-01): true only for a runtime-created zone
+  // (zone_slot_cache_ is populated exclusively by rehydrate_zone_registry_()
+  // and add_zone_at_runtime()'s own reuse branch, never by set_zones() - the
+  // compile-time path) - matches the existing compile-time/runtime boundary
+  // add/remove already enforce (CR-02, above). Plain pointer read, safe to
+  // call cross-task from the httpd handler, mirroring how handle_get_zones_
+  // already reads zones_ state without a lock.
+  bool is_runtime_zone(uint8_t zone_id) const {
+    return zone_id < 32 && this->zone_slot_cache_[zone_id] != nullptr;
+  }
+  // RENAME-01 (13.1.1-01): pure NVS-metadata mutation for a runtime zone's
+  // custom display name - deliberately separate from
+  // save_zone_to_sensor()/save_zone_from_editor() (those write to the
+  // physical radar over UART; a rename never does). Runs on the main loop
+  // (deferred via App.scheduler.set_timeout by Plan 02's HTTP handler).
+  void rename_zone_at_runtime(uint8_t zone_id, const std::string &name);
+  void json_get_free_slots(JsonObject root);
+  // CR-01 fix (11-03): synchronous "a save is in flight" bookkeeping, set by
+  // the /api/zones/save httpd handler *before* it schedules the deferred
+  // save_zone_from_editor() call. This is a plain bool flag flip, not a
+  // radar-mutating call, so setting it directly from the httpd task does not
+  // violate the WEBUI-02 deferred-mutation contract (only actual sensor
+  // writes must go through App.scheduler). It closes the race where an
+  // immediate GET /api/zones/status - fired right after the 202 response -
+  // could read stale pending_save_attr_ids_/save_failed_ state from before
+  // the scheduled lambda has run (or from boot, on the very first save).
+  // Cleared by save_zone_from_editor() itself, right before it hands off to
+  // save_zone_to_sensor(), which takes over pending-state ownership via
+  // pending_save_attr_ids_/save_failed_.
+  void mark_editor_save_queued() { editor_save_queued_ = true; }
   // Read by the wait_until: condition lambda and api.respond lambdas in the
   // fp2_save_global_zone_to_sensor HA action (fp2-sala.yaml/example_config.yaml).
-  bool save_pending() { return !pending_save_attr_ids_.empty(); }
+  // CR-01 fix (12-REVIEW #2): pending_save_attr_ids_ (a std::vector<AttrId>)
+  // is mutated with .clear()/.push_back()/.erase() exclusively on the
+  // main-loop task; reading its .empty() state directly from the httpd task
+  // (zones_web_handler.h's handle_get_status_(), polled every second) races
+  // those mutations - the same hazard class CR-01 (iter3) fixed for zones_.
+  // WR-02 fix (12-REVIEW): save_batch_in_progress_ is a plain bool set true
+  // as the FIRST statement of each deferred create/delete/save mutation
+  // (add_zone_at_runtime/remove_zone_at_runtime/save_zone_from_editor/
+  // save_zone_to_sensor), before any validation runs, and cleared false
+  // either on an invalid-input early return or at batch completion/ACK (see
+  // its declaration below) - so save_pending() reads true for the entire
+  // duration a mutation is being processed on the main loop, and this
+  // single-word cross-task read from the httpd status poller never observes
+  // a stale pending:false window mid-mutation. Still safe to read cross-task
+  // without a lock (plain bool, single-word read).
+  bool save_pending() { return editor_save_queued_ || save_batch_in_progress_; }
   bool save_ok() { return !save_failed_; }
-  std::string save_error() { return save_error_; }
+  // CR-01 fix (12-REVIEW #2): save_error_ is a std::string reassigned
+  // exclusively on the main-loop task; copy-constructing it from the httpd
+  // task while a reassignment is in flight can dereference a heap buffer
+  // the main-loop task just freed (UB). Only surface it once the batch has
+  // fully settled - during an in-flight batch there is nothing meaningful
+  // to report yet anyway (callers gate display on save_ok()/save_pending()).
+  std::string save_error() { return save_batch_in_progress_ ? std::string() : save_error_; }
 
 protected:
   // Internal logic
@@ -576,6 +730,23 @@ protected:
   bool load_global_zone_override_(FP2GlobalZoneOverride *out);
   void save_global_zone_override_(uint8_t presence_sensitivity);
 
+  // RENAME-01 (13.1.1-01): custom-name load/save - a DISTINCT, separately
+  // versioned NVS blob from FP2ZoneOverride above (see FP2ZoneName's
+  // comment). load_* returns false (treated as "no custom name - use the
+  // canonical default") on a missing entry OR a version mismatch, same
+  // graceful-absence contract as load_zone_override_().
+  bool load_zone_name_(uint8_t zone_id, char *out, size_t out_len);
+  void save_zone_name_(uint8_t zone_id, const char *name);
+
+  // ZONEMGMT-03/04 (12-01): registry MEMBERSHIP load/save helpers (distinct
+  // from the per-zone-content overrides above) plus the boot-time
+  // rehydration entry point. load_* returns false (treated as "no runtime
+  // registry ever saved - compile-time zones_ stands as-is") on a missing
+  // entry OR a version mismatch, same idiom as load_zone_override_() above.
+  bool load_zone_registry_meta_(FP2ZoneRegistryMeta *out);
+  void save_zone_registry_meta_(uint32_t active_mask);
+  void rehydrate_zone_registry_();
+
   aqara_fp2_accel::AqaraFP2Accel *fp2_accel_{nullptr};
 
   GPIOPin *reset_pin_{nullptr};
@@ -615,7 +786,21 @@ protected:
   binary_sensor::BinarySensor *global_motion_sensor_{nullptr};
 
   // Zones
+  // CR-01 fix (12-REVIEW iter2): reserve(32) in setup() fixes this vector's
+  // backing storage for the lifetime of the program so push_back() in
+  // add_zone_at_runtime() never reallocates - the httpd task's
+  // handle_get_zones_()/handle_get_free_slots_() range-iterate this same
+  // vector with no lock (see zones_web_handler.h). remove_zone_at_runtime()
+  // never erase()s either, for the same reason (erase() shifts the buffer in
+  // place); it flips FP2Zone::active instead. Every reader must skip
+  // inactive entries.
   std::vector<FP2Zone*> zones_;
+  // Pitfall 4 (12-RESEARCH.md): ESPHome has no App.unregister_binary_sensor()
+  // - reuse an ever-constructed FP2Zone/BinarySensor object on re-add rather
+  // than leaking a fresh allocation every remove-then-re-add cycle within
+  // one uptime. Index is the zone ID (0-31); nullptr = never constructed
+  // this boot.
+  std::array<FP2Zone*, 32> zone_slot_cache_{};
   text_sensor::TextSensor *target_tracking_sensor_{nullptr};
   FP2LocationSwitch *location_report_switch_{nullptr};
   FP2OperatingModeSelect *operating_mode_select_{nullptr};
@@ -657,6 +842,29 @@ protected:
   uint16_t telnet_port_{23};
   std::unique_ptr<socket::Socket> telnet_listen_socket_;
   std::unique_ptr<socket::Socket> telnet_client_;
+
+  // WEBUI-03/D-04 (11-01): project-owned SSE overlay for the device-hosted
+  // /zones live view. Mirrors the telnet_client_ nullable-optional-resource
+  // shape above - no socket/source exists unless set_zone_editor_sse() is
+  // called (Plan 04's on_boot lambda). sse_reporting_active_ is the D-04
+  // edge-detection flag: true only while location reporting was turned on
+  // because of this source's client count, so loop() toggles
+  // set_location_reporting_enabled() exactly once per connect/disconnect
+  // transition instead of every tick.
+  std::unique_ptr<esphome::web_server_idf::AsyncEventSource> zone_editor_sse_;
+  bool sse_reporting_active_{false};
+  // WR-01 fix (11-03): whether *this SSE session* is the one that turned
+  // location reporting on (i.e. it was off, HA-side, at connect time).
+  // Only true in that case does the disconnect edge turn it back off -
+  // otherwise a user-enabled "Report Targets" switch (or another consumer
+  // depending on target_tracking_sensor_) would get silently clobbered by
+  // an unrelated /zones page open+close.
+  bool sse_forced_reporting_on_{false};
+
+  // WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null
+  // unless web_server_id/web_server_base_id set in YAML.
+  esphome::web_server_base::WebServerBase *web_server_base_{nullptr};
+  esphome::web_server::WebServer *web_server_{nullptr};
 
   // Map Configuration (compile-time generated)
   std::string map_config_json_;
@@ -706,6 +914,21 @@ protected:
   std::vector<AttrId> pending_save_attr_ids_;
   bool save_failed_{false};
   std::string save_error_;
+  // CR-01 fix (12-REVIEW #2): scalar mirror of "a save batch is currently
+  // open", set at the start of every save_*_to_sensor()/add_zone_at_runtime()/
+  // remove_zone_at_runtime() batch (alongside the existing
+  // pending_save_attr_ids_.clear()) and cleared only in
+  // process_command_queue_()'s timeout-exhaustion branch or once
+  // pending_save_attr_ids_ drains to empty in handle_ack_(). Exists so
+  // save_pending()/save_error() can be read cross-task (httpd task, via
+  // zones_web_handler.h's handle_get_status_()) as a plain bool / gated
+  // string instead of directly inspecting pending_save_attr_ids_, which is
+  // mutated with push_back()/erase() only on the main-loop task.
+  bool save_batch_in_progress_{false};
+  // CR-01 fix (11-03): true from the moment the /api/zones/save httpd
+  // handler schedules the deferred save, until save_zone_from_editor()
+  // actually runs on the main loop and clears it. See mark_editor_save_queued().
+  bool editor_save_queued_{false};
 
   // Sleep-mode heartbeat keepalive (PROTO-02). Internal-only, no config toggle:
   // gated on sleep_mode_active_, set true by configure_sleep_mode(). Stock firmware
