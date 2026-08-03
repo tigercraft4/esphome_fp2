@@ -1727,7 +1727,6 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
     }
     for (var i = 0; i < targets.length; i++) {
       var tgt = targets[i];
-      if (!tgt.active) continue;
       var xy = targetToGridXY(tgt.x, tgt.y, mountingPosition);
       // Refactored to route through the single ported FP2Geometry mirror
       // check point (13-03-PLAN.md Task 1) — same behavior as the prior
