@@ -213,7 +213,7 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
                                       grid_hex);
         });
 
-    request->send(202, "application/json", R"({"status":"pending"})");
+    request->send(200, "application/json", R"({"status":"pending"})");
   }
 
   // POST /api/zones/create - ZONEMGMT-01: submit-then-poll deferred zone
@@ -290,7 +290,7 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
           fp2->add_zone_at_runtime((uint8_t) zone_id, (uint8_t) sensitivity, zone_type);
         });
 
-    request->send(202, "application/json", R"({"status":"pending"})");
+    request->send(200, "application/json", R"({"status":"pending"})");
   }
 
   // POST /api/zones/delete - ZONEMGMT-02: submit-then-poll deferred zone
@@ -336,7 +336,7 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
       fp2->remove_zone_at_runtime((uint8_t) zone_id);
     });
 
-    request->send(202, "application/json", R"({"status":"pending"})");
+    request->send(200, "application/json", R"({"status":"pending"})");
   }
 
   // GET /api/zones/free-slots - ZONEMGMT-04: dropdown data source for the
