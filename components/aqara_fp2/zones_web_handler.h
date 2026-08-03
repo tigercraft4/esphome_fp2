@@ -27,7 +27,8 @@
 class ZonesPageHandler : public esphome::web_server_idf::AsyncWebHandler {
  public:
   bool canHandle(esphome::web_server_idf::AsyncWebServerRequest *request) const override {
-    return request->method() == HTTP_GET && request->url() == "/zones";
+    char url_buf[esphome::web_server_idf::AsyncWebServerRequest::URL_BUF_SIZE];
+    return request->method() == HTTP_GET && request->url_to(url_buf) == "/zones";
   }
 
   void handleRequest(esphome::web_server_idf::AsyncWebServerRequest *request) override {
