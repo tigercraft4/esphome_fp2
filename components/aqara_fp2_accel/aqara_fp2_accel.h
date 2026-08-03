@@ -45,7 +45,7 @@ enum class Orientation : uint8_t {
 };
 
 // String mapping for logging
-static const char *orientation_to_string(Orientation orient) {
+inline const char *orientation_to_string(Orientation orient) {
   switch (orient) {
     case Orientation::UP: return "UP";
     case Orientation::UP_TILT: return "UP_TILT";
