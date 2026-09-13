@@ -168,6 +168,9 @@ mqtt:
   port: 1883
   id: mqtt_client
   discovery: false
+  # reboot_timeout: 0s desativa o auto-reboot nativo do ESPHome (default 5min)
+  # que causou reboots a cada ~15min quando o mqtt: foi adicionado sem este valor
+  reboot_timeout: 0s
   birth_message:
     topic: casaff/fp2-sala/status
     payload: online
