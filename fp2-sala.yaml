@@ -215,7 +215,9 @@ aqara_fp2:
 
   people_counting_report_enable: true
   people_number_enable: true
-  target_type_enable: true
+  # AI Person Detection can suppress valid people (notably close/low/static
+  # targets) before the multi-target frame reaches ESPHome. Keep raw targets.
+  target_type_enable: false
   dwell_time_enable: false
   walking_distance_enable: false
   thermodynamic_chart_enable: true
@@ -295,6 +297,11 @@ aqara_fp2:
     name: "Ontime People Number"
   realtime_people_counting:
     name: "Realtime People Counting"
+  # Number of complete targets in the live 0x0117 stream. This is the current
+  # occupancy count shown in the dashboard; unlike people_counting it is not
+  # an entry/exit/event counter.
+  target_count:
+    name: "Target Count"
   people_counting:
     name: "People Counting"
   walking_distance:

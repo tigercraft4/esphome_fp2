@@ -814,7 +814,8 @@ protected:
   bool location_reporting_active_{true};
   uint32_t last_location_debug_millis_{0};
   uint8_t last_location_target_count_{0xFF};
-  uint32_t last_target_publish_millis_{0};
+  uint8_t last_published_target_count_{0xFF};
+  uint32_t last_nearest_distance_publish_millis_{0};
 
   // Grid text sensors
   text_sensor::TextSensor *edge_label_grid_sensor_{nullptr};

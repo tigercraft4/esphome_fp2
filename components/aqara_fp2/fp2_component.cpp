@@ -1,4 +1,5 @@
 #include "fp2_component.h"
+#include "location_targets.h"
 #ifdef AQARA_FP2_HAS_DEVICE_WEBUI
 #include "zones_web_handler.h"
 #endif
@@ -2173,12 +2174,15 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
     return;
   }
 
-  // Payload: [SubID 2] [Type 0x06(BLOB2)] [Len 2] [Count 1] [Target 14]...
-  if (payload.size() < 6 || payload[2] != 0x06) {
+  LocationTargets targets;
+  if (!parse_location_targets(payload, &targets)) {
+    ESP_LOGW(TAG, "Rejected malformed location target BLOB (payload_len=%u)",
+             static_cast<unsigned>(payload.size()));
+    publish_radar_debug_("location_tracking_malformed", AttrId::LOCATION_TRACKING_DATA, payload);
     return;
   }
 
-  uint8_t count = payload[5];
+  const uint8_t count = targets.count;
   uint32_t now = millis();
   if (count != last_location_target_count_ || now - last_location_debug_millis_ > 5000) {
     ESP_LOGD(TAG, "Location tracking report: targets=%u payload_len=%u",
@@ -2189,8 +2193,7 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
 
   // Build binary buffer: [count][target1 14 bytes][target2 14 bytes]...
   // Each target is 14 bytes: id(1), x(2), y(2), z(2), velocity(2), snr(2), classifier(1), posture(1), active(1)
-  std::vector<uint8_t> binary_data;
-  binary_data.push_back(count);
+  const std::vector<uint8_t> &binary_data = targets.blob;
 
   // Corner-mount coordinate scale (PROTOCOL 5.1): X/Y raw span 800 units = 7 m.
   static constexpr float METERS_PER_UNIT = 7.0f / 800.0f;
@@ -2198,18 +2201,11 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
   uint8_t valid = 0;
 
   for (int i = 0; i < count; i++) {
-    int offset = 6 + (i * 14);
-    if (offset + 14 > payload.size())
-      break;
-
-    // Copy raw 14-byte target data directly (already in correct big-endian format)
-    binary_data.insert(binary_data.end(),
-                       payload.begin() + offset,
-                       payload.begin() + offset + 14);
+    const size_t offset = 1 + static_cast<size_t>(i) * LOCATION_TARGET_BYTES;
 
     // Target layout: id(1), X s16(2), Y s16(2), ... (big endian)
-    int16_t x = (int16_t)((payload[offset + 1] << 8) | payload[offset + 2]);
-    int16_t y = (int16_t)((payload[offset + 3] << 8) | payload[offset + 4]);
+    int16_t x = (int16_t)((binary_data[offset + 1] << 8) | binary_data[offset + 2]);
+    int16_t y = (int16_t)((binary_data[offset + 3] << 8) | binary_data[offset + 4]);
     float dist_m = sqrtf((float) x * x + (float) y * y) * METERS_PER_UNIT;
     if (std::isnan(nearest) || dist_m < nearest)
       nearest = dist_m;
@@ -2229,16 +2225,18 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
   }
 #endif
 
-  // Derived numeric sensors (throttled to ~1 Hz; the raw stream is 10-20 Hz).
-  if ((target_count_sensor_ != nullptr || nearest_distance_sensor_ != nullptr) &&
-      now - last_target_publish_millis_ >= 1000) {
-    last_target_publish_millis_ = now;
-    if (target_count_sensor_ != nullptr) {
-      target_count_sensor_->publish_state(valid);
-    }
-    if (nearest_distance_sensor_ != nullptr) {
-      nearest_distance_sensor_->publish_state(nearest);  // NAN -> unknown when no targets
-    }
+  // Publish count immediately on every edge. A short-lived second target must
+  // not disappear merely because it arrived between one-second samples.
+  if (target_count_sensor_ != nullptr &&
+      target_count_changed(valid, &last_published_target_count_)) {
+    target_count_sensor_->publish_state(valid);
+  }
+
+  // Distance is telemetry only and remains throttled to ~1 Hz because the raw
+  // location stream normally arrives at 10-20 Hz.
+  if (nearest_distance_sensor_ != nullptr && now - last_nearest_distance_publish_millis_ >= 1000) {
+    last_nearest_distance_publish_millis_ = now;
+    nearest_distance_sensor_->publish_state(nearest);  // NAN -> unknown when no targets
   }
 }
 
