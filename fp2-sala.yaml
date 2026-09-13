@@ -228,7 +228,7 @@ aqara_fp2:
   accel: fp2_accel
   uart_id: uart_bus
   radar_reset_pin: GPIO13
-  mounting_position: left_corner
+  mounting_position: right_corner
   left_right_reverse: false
 
   people_counting_report_enable: true
