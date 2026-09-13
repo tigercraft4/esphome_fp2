@@ -1,8 +1,7 @@
 #include "fp2_component.h"
-// WEBUI-01/02/03 (11-04): must come after fp2_component.h - zones_web_handler.h
-// includes it back and needs FP2Component fully declared first. Resolved via
-// fp2-sala.yaml's esphome: includes: (Task 3).
+#ifdef AQARA_FP2_HAS_DEVICE_WEBUI
 #include "zones_web_handler.h"
+#endif
 #include "esphome/components/switch/switch.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
@@ -217,27 +216,19 @@ void FP2Component::setup() {
     }
   }
 
-  // WEBUI-01/02/03 (11-04): register the 11-02/11-03 page+api handlers and
-  // the 11-01 SSE overlay onto the existing web_server. Nothing is
-  // registered unless web_server_id/web_server_base_id were set in YAML
-  // (web_server_base_ stays nullptr otherwise).
+#ifdef AQARA_FP2_HAS_DEVICE_WEBUI
+  // Register the optional device-hosted /zones handlers only when the
+  // corresponding ESPHome web_server components are compiled in.
   if (this->web_server_base_ != nullptr) {
     this->web_server_base_->add_handler(new ::ZonesPageHandler());
     this->web_server_base_->add_handler(new ::ZonesApiHandler(this));
-    // WR-03 (12-REVIEW): /api/zones/create and /api/zones/delete are
-    // destructive, unauthenticated-by-default POST endpoints with no CSRF
-    // protection - mirrors the telnet bridge's own LAN-ONLY warning above.
-    // Consider adding a `web_server: auth:` block in YAML if this device is
-    // reachable by untrusted clients on the LAN.
-    ESP_LOGW(TAG, "zone editor /api/zones/create and /api/zones/delete are LAN-ONLY, "
-                  "NO CSRF PROTECTION. Never expose this device's web server to the internet.");
-
     if (this->web_server_ != nullptr) {
       auto *sse = new esphome::web_server_idf::AsyncEventSource("/zones/events", this->web_server_);
       this->web_server_base_->add_handler(sse);
       this->set_zone_editor_sse(sse);
     }
   }
+#endif
 }
 
 void FP2Component::perform_reset_() {
@@ -1376,31 +1367,25 @@ void FP2Component::loop() {
     }
   }
 
-  // D-04 (11-01): poll the project-owned /zones/events SSE source and toggle
-  // location reporting on the connect/disconnect edge (not every tick).
-  // loop() must run first - it reaps dead sessions, which is required before
-  // empty()/count() reflect reality (Pitfall 4).
+#ifdef AQARA_FP2_HAS_DEVICE_WEBUI
   if (this->zone_editor_sse_ != nullptr) {
     this->zone_editor_sse_->loop();
     bool has_clients = !this->zone_editor_sse_->empty();
     if (has_clients && !this->sse_reporting_active_) {
-      // WR-01 fix: only claim ownership of turning reporting off later if
-      // this session is the one turning it on now. If it was already on
-      // (e.g. a user enabled "Report Targets" in HA), leave that owner's
-      // intent alone on disconnect.
       this->sse_forced_reporting_on_ = !this->location_reporting_active_;
       if (this->sse_forced_reporting_on_) {
-        this->set_location_reporting_enabled(true); // D-04 connect
+        this->set_location_reporting_enabled(true);
       }
       this->sse_reporting_active_ = true;
     } else if (!has_clients && this->sse_reporting_active_) {
       if (this->sse_forced_reporting_on_) {
-        this->set_location_reporting_enabled(false); // D-04 disconnect
+        this->set_location_reporting_enabled(false);
         this->sse_forced_reporting_on_ = false;
       }
       this->sse_reporting_active_ = false;
     }
   }
+#endif
 
   check_initialization_();
   process_command_queue_();
@@ -2240,13 +2225,11 @@ void FP2Component::handle_location_tracking_report_(const std::vector<uint8_t> &
     this->target_tracking_sensor_->publish_state(base64_str);
   }
 
-  // WEBUI-03 (11-01): push the SAME base64 payload to the /zones live overlay
-  // over the dedicated SSE source, if a client is connected. No re-encoding -
-  // byte-for-byte parity with the target_tracking text sensor above so
-  // card.js's decodeTargetsBase64() works unchanged on the client side.
+#ifdef AQARA_FP2_HAS_DEVICE_WEBUI
   if (this->zone_editor_sse_ != nullptr) {
     this->zone_editor_sse_->try_send_nodefer(base64_str.c_str(), base64_str.size(), "target_update");
   }
+#endif
 
   // Derived numeric sensors (throttled to ~1 Hz; the raw stream is 10-20 Hz).
   if ((target_count_sensor_ != nullptr || nearest_distance_sensor_ != nullptr) &&

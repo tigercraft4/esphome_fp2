@@ -7,13 +7,15 @@
 #include "esphome/components/socket/socket.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
-// WEBUI-03 (11-01): dedicated SSE overlay member (zone_editor_sse_) for the
-// device-hosted zone editor's live target-tracking view (D-04).
+// Device-hosted Web UI is truly optional. ESPHome only copies component
+// headers into the generated source tree when that component is enabled in
+// YAML, so use __has_include rather than an unconditional dependency.
+#if __has_include("esphome/components/web_server/web_server.h")
+#define AQARA_FP2_HAS_DEVICE_WEBUI 1
 #include "esphome/components/web_server_idf/web_server_idf.h"
-// WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null unless
-// web_server_id/web_server_base_id set in YAML.
 #include "esphome/components/web_server_base/web_server_base.h"
 #include "esphome/components/web_server/web_server.h"
+#endif
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 
@@ -533,23 +535,18 @@ public:
       fp2_accel_ = accel;
   }
 
-  // WEBUI-03 (11-01): register the project-owned /zones/events SSE source
-  // (constructed and add_handler()'d from fp2-sala.yaml's on_boot lambda,
-  // Plan 04). Nullptr-safe by construction - loop() and the push site both
-  // guard on zone_editor_sse_ != nullptr, so the component works unchanged
-  // if this is never called.
+#ifdef AQARA_FP2_HAS_DEVICE_WEBUI
+  // Optional device-hosted zone editor wiring.
   void set_zone_editor_sse(esphome::web_server_idf::AsyncEventSource *sse) {
       this->zone_editor_sse_.reset(sse);
   }
-
-  // WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null
-  // unless web_server_id/web_server_base_id set in YAML.
   void set_web_server_base(esphome::web_server_base::WebServerBase *base) {
       this->web_server_base_ = base;
   }
   void set_web_server(esphome::web_server::WebServer *ws) {
       this->web_server_ = ws;
   }
+#endif
 
   void set_location_reporting_enabled(bool enabled);
   void force_detection_config();
@@ -853,28 +850,14 @@ protected:
   std::unique_ptr<socket::Socket> telnet_listen_socket_;
   std::unique_ptr<socket::Socket> telnet_client_;
 
-  // WEBUI-03/D-04 (11-01): project-owned SSE overlay for the device-hosted
-  // /zones live view. Mirrors the telnet_client_ nullable-optional-resource
-  // shape above - no socket/source exists unless set_zone_editor_sse() is
-  // called (Plan 04's on_boot lambda). sse_reporting_active_ is the D-04
-  // edge-detection flag: true only while location reporting was turned on
-  // because of this source's client count, so loop() toggles
-  // set_location_reporting_enabled() exactly once per connect/disconnect
-  // transition instead of every tick.
+#ifdef AQARA_FP2_HAS_DEVICE_WEBUI
+  // Optional device-hosted /zones live view state.
   std::unique_ptr<esphome::web_server_idf::AsyncEventSource> zone_editor_sse_;
   bool sse_reporting_active_{false};
-  // WR-01 fix (11-03): whether *this SSE session* is the one that turned
-  // location reporting on (i.e. it was off, HA-side, at connect time).
-  // Only true in that case does the disconnect edge turn it back off -
-  // otherwise a user-enabled "Report Targets" switch (or another consumer
-  // depending on target_tracking_sensor_) would get silently clobbered by
-  // an unrelated /zones page open+close.
   bool sse_forced_reporting_on_{false};
-
-  // WEBUI-01/02 (11-04): optional device-hosted zone-editor wiring; null
-  // unless web_server_id/web_server_base_id set in YAML.
   esphome::web_server_base::WebServerBase *web_server_base_{nullptr};
   esphome::web_server::WebServer *web_server_{nullptr};
+#endif
 
   // Map Configuration (compile-time generated)
   std::string map_config_json_;
