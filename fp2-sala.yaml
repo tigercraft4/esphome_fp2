@@ -151,6 +151,32 @@ ota:
 logger:
   level: INFO
 
+# Diagnóstico de reboots (2026-09-13): publica o motivo do último reset
+# (panic/watchdog/brownout/power-on/...) e sobe-o via MQTT com retain, para
+# sobreviver a quedas de WiFi/API e ficar visível mesmo que ninguém esteja
+# a ver a página de Logs no momento da queda.
+debug:
+  update_interval: 60s
+
+text_sensor:
+  - platform: debug
+    reset_reason:
+      name: "FP2 Reset Reason"
+
+mqtt:
+  broker: mqtt.tigercraft4.com
+  port: 1883
+  id: mqtt_client
+  discovery: false
+  birth_message:
+    topic: casaff/fp2-sala/status
+    payload: online
+    retain: true
+  will_message:
+    topic: casaff/fp2-sala/status
+    payload: offline
+    retain: true
+
 uart:
   id: uart_bus
   tx_pin: GPIO19
