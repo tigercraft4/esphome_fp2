@@ -1065,40 +1065,65 @@ class AqaraFP2Card extends HTMLElement {
     return { zoneKey, zoneId, zoneLabel, globalSensitivity, isNew };
   }
 
-  // Awaited service-call helper mirroring fetchMapConfig()'s
-  // hass.callService('esphome', service, {...}, undefined, undefined, true)
-  // shape (card.js:874) — calls the 09-02 fp2_save_zone_to_sensor HA action
-  // and returns the real ACK-gated outcome (never an optimistic guess).
+  // ESPHome custom actions are exposed by HA without return_response support.
+  // Call them normally, then verify the durable in-memory map by polling the
+  // existing get_map_config response action.
   async saveZoneToSensor(hass, deviceName, zoneId, gridHex, sensitivity, zoneType) {
     const service = `${deviceName}_fp2_save_zone_to_sensor`;
     try {
       console.log(`[FP2 Card] Saving zone ${zoneId} to sensor via service: esphome.${service}`);
-      const response = await hass.callService(
-        "esphome",
-        service,
+      await hass.callService(
+        "esphome", service,
         { zone_id: zoneId, grid_hex: gridHex, sensitivity, zone_type: zoneType },
-        undefined,
-        undefined,
-        true,
       );
-      const result = (response && response.response) || {};
-      return { success: !!result.success, error: result.error_message };
+      const verified = await this.waitForZoneConfig(zoneId, gridHex, sensitivity, zoneType);
+      return { success: verified, error: verified ? undefined : "zone config did not match map_config" };
     } catch (e) {
       console.error(`[FP2 Card] saveZoneToSensor failed:`, e);
       return { success: false, error: String(e) };
     }
   }
 
+  async waitForZoneConfig(zoneId, gridHex, sensitivity, zoneType, attempts = 20) {
+    for (let i = 0; i < attempts; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await this.fetchMapConfig();
+      const zones = this.mapConfig && Array.isArray(this.mapConfig.zones)
+        ? this.mapConfig.zones
+        : [];
+      const zone = zones.find((z) => Number(z.id) === Number(zoneId));
+      if (!zone) continue;
+      const actualGrid = String(zone.grid || "").toLowerCase();
+      const gridMatches = actualGrid && gridHex.toLowerCase().startsWith(actualGrid);
+      const sensitivityMatches = Number(zone.sensitivity) === Number(sensitivity);
+      const typeMatches = zoneType < 0 || Number(zone.zone_type) === Number(zoneType);
+      if (gridMatches && sensitivityMatches && typeMatches) return true;
+    }
+    return false;
+  }
+
+  async waitForZonePresence(zoneId, shouldExist, attempts = 20) {
+    for (let i = 0; i < attempts; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await this.fetchMapConfig();
+      const zones = this.mapConfig && Array.isArray(this.mapConfig.zones)
+        ? this.mapConfig.zones
+        : [];
+      const exists = zones.some((z) => Number(z.id) === Number(zoneId));
+      if (exists === shouldExist) return true;
+    }
+    return false;
+  }
+
   async addZoneToSensor(hass, deviceName, zoneId, sensitivity, zoneType) {
     const service = `${deviceName}_fp2_add_zone`;
     try {
-      const response = await hass.callService(
+      await hass.callService(
         "esphome", service,
         { zone_id: zoneId, sensitivity, zone_type: zoneType },
-        undefined, undefined, true,
       );
-      const result = (response && response.response) || {};
-      return { success: !!result.success, error: result.error_message };
+      const persisted = await this.waitForZonePresence(zoneId, true);
+      return { success: persisted, error: persisted ? undefined : "zone did not appear in map_config" };
     } catch (e) {
       console.error(`[FP2 Card] addZoneToSensor failed:`, e);
       return { success: false, error: String(e) };
@@ -1108,34 +1133,24 @@ class AqaraFP2Card extends HTMLElement {
   async removeZoneFromSensor(hass, deviceName, zoneId) {
     const service = `${deviceName}_fp2_remove_zone`;
     try {
-      const response = await hass.callService(
-        "esphome", service, { zone_id: zoneId },
-        undefined, undefined, true,
-      );
-      const result = (response && response.response) || {};
-      return { success: !!result.success, error: result.error_message };
+      await hass.callService("esphome", service, { zone_id: zoneId });
+      const removed = await this.waitForZonePresence(zoneId, false);
+      return { success: removed, error: removed ? undefined : "zone still present in map_config" };
     } catch (e) {
       console.error(`[FP2 Card] removeZoneFromSensor failed:`, e);
       return { success: false, error: String(e) };
     }
   }
 
-  // Awaited service-call helper mirroring fetchMapConfig()'s shape — calls
-  // the 09-01 fp2_save_global_zone_to_sensor HA action.
+  // Global-zone saves use the same custom action transport. The current map
+  // response does not expose global sensitivity for read-back, so success is
+  // the completed service call; zone writes above are verified explicitly.
   async saveGlobalZoneToSensor(hass, deviceName, sensitivity) {
     const service = `${deviceName}_fp2_save_global_zone_to_sensor`;
     try {
       console.log(`[FP2 Card] Saving Global Zone sensitivity to sensor via service: esphome.${service}`);
-      const response = await hass.callService(
-        "esphome",
-        service,
-        { sensitivity },
-        undefined,
-        undefined,
-        true,
-      );
-      const result = (response && response.response) || {};
-      return { success: !!result.success, error: result.error_message };
+      await hass.callService("esphome", service, { sensitivity });
+      return { success: true };
     } catch (e) {
       console.error(`[FP2 Card] saveGlobalZoneToSensor failed:`, e);
       return { success: false, error: String(e) };
