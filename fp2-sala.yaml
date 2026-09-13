@@ -273,6 +273,34 @@ aqara_fp2:
   fall_detected:
     name: "Fall Detected"
 
+  # Zona física do sofá recuperada do histórico do fork. A geometria pode ser
+  # afinada no editor do dashboard e gravada no sensor; a entidade é compilada
+  # para ficar sempre disponível no Home Assistant/Node-RED.
+  zones:
+    - id: sofa_zone
+      grid: |-
+        . . X X X . . . . . . . . .
+        . . X X X . . . . . . . . .
+        . . X X X . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+      presence_sensitivity: high
+      presence:
+        name: "Sofa Zone Presence"
+      motion:
+        name: "Sofa Zone Motion"
+      people_count:
+        name: "Sofa Zone People Count"
+
   radar_software_version:
     name: "Radar Software Version"
   radar_temperature:
