@@ -219,7 +219,7 @@ aqara_fp2:
 
   people_counting_report_enable: true
   people_number_enable: true
-  target_type_enable: false
+  target_type_enable: true
   dwell_time_enable: false
   walking_distance_enable: false
   thermodynamic_chart_enable: true
@@ -279,6 +279,8 @@ aqara_fp2:
       presence_sensitivity: medium
       presence:
         name: "Geral"
+      people_count:
+        name: "Geral People Count"
 
   radar_software_version:
     name: "Radar Software Version"

@@ -83,7 +83,7 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
       auto csrf_header = request->get_header("X-FP2-CSRF");
       if (!csrf_header.has_value() || csrf_header.value() != "1") {
         ESP_LOGW("aqara_fp2.zones_api", "Rejected %s: missing/invalid X-FP2-CSRF header (CSRF-01)", action.c_str());
-        request->send(403, "application/json", R"({"error":"missing X-FP2-CSRF header"})");
+        request->send(400, "application/json", R"({"error":"missing X-FP2-CSRF header"})");
         return;
       }
     }
