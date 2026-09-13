@@ -1387,10 +1387,19 @@ class AqaraFP2Card extends HTMLElement {
         .editor-controls {
           display: none;
           align-items: center;
+          flex-wrap: wrap;
+          width: 100%;
           gap: 8px;
           font-size: 14px;
         }
+        .editor-controls button {
+          flex: 0 0 auto;
+          white-space: nowrap;
+        }
         .editor-controls .layer-select {
+          flex: 1 1 180px;
+          min-width: 0;
+          max-width: 100%;
           background: none;
           border: 1px solid var(--divider-color);
           border-radius: 4px;
@@ -1491,11 +1500,17 @@ class AqaraFP2Card extends HTMLElement {
         .editor-controls .global-zone-field {
           display: flex;
           align-items: center;
+          flex: 1 1 220px;
+          flex-wrap: wrap;
+          min-width: 0;
           gap: 4px;
           color: var(--primary-text-color);
           font-size: 14px;
         }
         .editor-controls .global-zone-sensitivity-select {
+          flex: 1 1 130px;
+          min-width: 0;
+          max-width: 100%;
           background: none;
           border: 1px solid var(--divider-color);
           border-radius: 4px;
