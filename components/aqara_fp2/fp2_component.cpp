@@ -3,6 +3,7 @@
 #include "zones_web_handler.h"
 #endif
 #include "esphome/components/switch/switch.h"
+#include "esphome/core/application.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -631,9 +632,9 @@ void FP2Component::rehydrate_zone_registry_() {
         // add_zone_at_runtime() already does below - clear the unset marker.
         zone->has_zone_type = false;
       }
-      if (zone->presence_sensor != nullptr) {
-        zone->presence_sensor->set_internal(false);
-      }
+      // Entity visibility is immutable after registration. ESPHome >=2026.7.2
+      // marks set_internal() at runtime as undefined behaviour; removed zones
+      // remain registered/unavailable and are safely reused here.
     } else {
       zone = new FP2Zone(id, ov.grid, ov.sensitivity);
       if (ov.zone_type >= 0) {
@@ -812,9 +813,9 @@ void FP2Component::add_zone_at_runtime(uint8_t zone_id, uint8_t sensitivity, int
       // leak into this zone's new life - clear the unset marker explicitly.
       zone->has_zone_type = false;
     }
-    if (zone->presence_sensor != nullptr) {
-      zone->presence_sensor->set_internal(false);
-    }
+    // Do not call set_internal(false) here: runtime mutation of the internal
+    // flag is undefined in ESPHome >=2026.7.2. The entity stays registered
+    // and becomes available again when a new state is published.
     // WR-01 fix (12-REVIEW): clear stale motion/debounce state from this
     // object's prior life (add-then-remove earlier this boot) BEFORE
     // reactivating - otherwise a leftover motion_active/last_motion_millis
@@ -1011,18 +1012,15 @@ void FP2Component::remove_zone_at_runtime(uint8_t zone_id) {
   enqueue_command_blob2_(AttrId::ZONE_MAP, empty_zone);
   pending_save_attr_ids_.push_back(AttrId::ZONE_MAP);
 
-  // HA entity: mark unavailable + hidden from the next ListEntitiesRequest
-  // (D-03). Do NOT delete the FP2Zone/BinarySensor objects - ESPHome has no
-  // App.unregister_binary_sensor() and a freed-but-referenced pointer is a
-  // use-after-free the API iterator will eventually dereference (Pitfall 4).
-  // Keep them alive in zone_slot_cache_ for reuse on a future re-add.
+  // HA entities remain registered for the lifetime of the device. Mark their
+  // state unavailable, but do not mutate EntityBase::internal at runtime:
+  // ESPHome >=2026.7.2 documents that as undefined behaviour and does not
+  // notify Home Assistant clients.
   if (zone->presence_sensor != nullptr) {
     zone->presence_sensor->invalidate_state();
-    zone->presence_sensor->set_internal(true);
   }
   if (zone->motion_sensor != nullptr) {
     zone->motion_sensor->invalidate_state();
-    zone->motion_sensor->set_internal(true);
   }
 
   // NVS: clear this ID's membership bit and persist (syncs). Leave the
