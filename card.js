@@ -558,40 +558,33 @@ class AqaraFP2Card extends HTMLElement {
     return this.zoneMeta[key];
   }
 
-  // ZONE-01/D-01: creates a new local-only zone slot (`zone:new:<n>`) in
-  // BOTH editorState (a fresh row-independent 14x14 zero grid, RESEARCH
-  // Pitfall 1 idiom) and zoneMeta (defaults), selects it, then ends with the
-  // populateLayerSelect()+updateCard() two-call tail clearSelectedLayer()
-  // establishes so the <select> and canvas both refresh (Pitfall 4).
-  //
-  // this._nextLocalZoneNum is lazily initialized to deviceZoneCount + 1 and
-  // ONLY ever incremented — it must NEVER be derived from a live count of
-  // this.zoneMeta's keys, or an add->remove->add cycle would reuse a number
-  // still implied by a surviving zone (Pitfall 5).
+  // ZONE-01/D-01: creates a new local-only zone slot (`zone:new:<id>`) in
+  // BOTH editorState (a fresh row-independent 14x14 zero grid) and zoneMeta.
+  // The suffix is the first free protocol zone ID (1..31), so Save to Sensor
+  // can persist it directly without any YAML zone declaration.
   addZone() {
-    // WR-04 fix: use the device zone count frozen at edit-mode entry
-    // (toggleEditMode()) rather than re-reading a live mapConfig value
-    // here — falls back to a live read only if addZone() is somehow
-    // invoked before edit mode was ever entered.
-    const deviceZoneCount =
-      this._deviceZoneCount != null
-        ? this._deviceZoneCount
-        : this.mapConfig && Array.isArray(this.mapConfig.zones)
-          ? this.mapConfig.zones.length
-          : 0;
-    if (this._nextLocalZoneNum == null) {
-      this._nextLocalZoneNum = deviceZoneCount + 1;
+    // Choose the first free protocol zone ID (1..31), using the IDs reported
+    // by get_map_config plus any local unsaved zones. This works with sparse
+    // runtime IDs and does not assume mapConfig order == zone_id - 1.
+    const usedIds = new Set();
+    if (this.mapConfig && Array.isArray(this.mapConfig.zones)) {
+      this.mapConfig.zones.forEach((z, index) => {
+        const id = Number.isInteger(z.id) ? z.id : index + 1;
+        if (id >= 1 && id <= 31) usedIds.add(id);
+      });
     }
-    const n = this._nextLocalZoneNum++;
-    // CR-01 fix: the key suffix derives PURELY from the monotonic
-    // _nextLocalZoneNum counter, never from deviceZoneCount. The old
-    // formula (`n - deviceZoneCount - 1`) re-read the live deviceZoneCount
-    // on every call, so an Import (mergeImportedMapConfig()) that changes
-    // this._deviceZoneCount between two addZone() calls could make this
-    // formula recompute a suffix that collides with an existing
-    // zone:new:* key from an earlier call, silently clobbering that
-    // zone's grid/label. Suffix uniqueness now depends only on
-    // _nextLocalZoneNum, which is seeded once and ever-incrementing.
+    Object.keys(this.editorState || {}).forEach((k) => {
+      if (k.startsWith("zone:new:")) {
+        const id = parseInt(k.slice("zone:new:".length), 10);
+        if (id >= 1 && id <= 31) usedIds.add(id);
+      }
+    });
+    let n = 1;
+    while (n <= 31 && usedIds.has(n)) n += 1;
+    if (n > 31) {
+      window.alert("No free zone slots (maximum 31 dashboard-managed zones).");
+      return;
+    }
     const key = `zone:new:${n}`;
 
     this.editorState[key] = Array.from({ length: 14 }, () =>
@@ -611,30 +604,42 @@ class AqaraFP2Card extends HTMLElement {
   }
 
   // D-02: deletes a locally-added zone (`zone:new:*`) from editorState+
-  // zoneMeta behind a window.confirm() gate — mirrors clearSelectedLayer()'s
-  // confirm-gated mutation shape (guard -> label -> confirm -> mutate ->
-  // populateLayerSelect()+updateCard() tail). A device-zone key (`zone:N`
-  // without `new:`) warns and is a no-op: device zones can never be removed
-  // from the editor.
-  removeZone(layerKey) {
-    if (typeof layerKey !== "string" || !layerKey.startsWith("zone:new:")) {
-      console.warn(
-        `[FP2 Card] removeZone blocked: "${layerKey}" is not a locally-added zone — device zones cannot be removed`,
-      );
-      return;
-    }
+  // Removes either a local unsaved zone or a persisted runtime zone. Device
+  // zones are removed through the ACK-gated ESPHome API action, then the
+  // map is re-imported so the editor reflects the device's durable state.
+  async removeZone(layerKey) {
+    if (typeof layerKey !== "string" || !layerKey.startsWith("zone:")) return;
 
     const label =
       (this.zoneMeta[layerKey] && this.zoneMeta[layerKey].label) || layerKey;
-    if (!window.confirm(`Remove "${label}"? This cannot be undone.`)) {
+    if (!window.confirm(`Remove "${label}"? This cannot be undone.`)) return;
+
+    if (layerKey.startsWith("zone:new:")) {
+      delete this.editorState[layerKey];
+      delete this.zoneMeta[layerKey];
+      this.selectedLayer = null;
+      this.populateLayerSelect();
+      this.updateCard();
       return;
     }
 
-    delete this.editorState[layerKey];
-    delete this.zoneMeta[layerKey];
+    const index = parseInt(layerKey.slice("zone:".length), 10);
+    const conf = this.mapConfig && Array.isArray(this.mapConfig.zones)
+      ? this.mapConfig.zones[index]
+      : null;
+    const zoneId = conf && Number.isInteger(conf.id) ? conf.id : index + 1;
+    const deviceName = this.config.entity_prefix.replace(/^[^.]+\./, "");
+    const result = await this.removeZoneFromSensor(this._hass, deviceName, zoneId);
+    if (!result.success) {
+      window.alert(`Remove zone failed: ${result.error || "unknown error"}`);
+      return;
+    }
+
+    await this.fetchMapConfig();
+    this.editorState = {};
+    this.zoneMeta = {};
+    this._deviceZoneCount = null;
     this.selectedLayer = null;
-    console.log(`[FP2 Card] Removed local zone: ${layerKey}`);
-    this.populateLayerSelect();
     this.updateCard();
   }
 
@@ -1017,40 +1022,39 @@ class AqaraFP2Card extends HTMLElement {
   // Phase 9 Save to Sensor (RUN-01/RUN-03/RUN-04, 09-UI-SPEC.md "Interaction
   // / scope-resolution logic" steps 1-3, the load-bearing contract this
   // method implements verbatim):
-  //   1. zoneTarget = this.selectedLayer only if it's an existing compiled
-  //      device zone ("zone:<n>", never "zone:new:*" — locally-added zones
-  //      aren't compiled yet — and never the fixed interference/exit/edge
-  //      layers).
+  //   1. zoneTarget = this.selectedLayer for either an existing device zone
+  //      ("zone:<index>") or a dashboard-created pending zone
+  //      ("zone:new:<protocol-id>").
   //   2. globalTarget = this.globalZoneMeta.presenceSensitivity, if set.
   //   3. If neither is set, the caller shows the "nothing to save" guard.
-  // The zone:<n> -> protocol zone_id conversion happens in exactly ONE
-  // place, here: the card's zone:<n> key is 0-based, but the compiled
-  // zone's protocol zone_id is 1-based (Pitfall 1, __init__.py:417's
-  // `id: zone_{i + 1}` positional numbering). {zoneLabel} is read from the
-  // <select>'s current option text — the same lookup clearSelectedLayer()
-  // already uses — never re-derived from the raw zone:<n> key.
+  // Existing device-zone IDs are read from mapConfig.zones[index].id when
+  // available; the index+1 fallback only supports older firmware payloads.
   resolveSaveTargets() {
     let zoneKey = null;
-    if (
-      typeof this.selectedLayer === "string" &&
-      this.selectedLayer.startsWith("zone:") &&
-      !this.selectedLayer.startsWith("zone:new:")
-    ) {
+    if (typeof this.selectedLayer === "string" && this.selectedLayer.startsWith("zone:")) {
       zoneKey = this.selectedLayer;
     }
 
     const globalSensitivity = this.globalZoneMeta.presenceSensitivity;
 
     if (zoneKey === null && globalSensitivity === null) {
-      return { zoneKey: null, zoneId: null, zoneLabel: null, globalSensitivity: null };
+      return { zoneKey: null, zoneId: null, zoneLabel: null, globalSensitivity: null, isNew: false };
     }
 
     let zoneId = null;
     let zoneLabel = null;
+    let isNew = false;
     if (zoneKey !== null) {
-      // Pitfall 1 (__init__.py:417): card zone:<n> is 0-based, compiled
-      // zone->id is 1-based protocol zone_id — convert once, here.
-      zoneId = parseInt(zoneKey.slice("zone:".length), 10) + 1;
+      if (zoneKey.startsWith("zone:new:")) {
+        zoneId = parseInt(zoneKey.slice("zone:new:".length), 10);
+        isNew = true;
+      } else {
+        const index = parseInt(zoneKey.slice("zone:".length), 10);
+        const conf = this.mapConfig && Array.isArray(this.mapConfig.zones)
+          ? this.mapConfig.zones[index]
+          : null;
+        zoneId = conf && Number.isInteger(conf.id) ? conf.id : index + 1;
+      }
       const select = this.querySelector(".layer-select");
       zoneLabel =
         select && select.selectedIndex >= 0 && select.options[select.selectedIndex]
@@ -1058,7 +1062,7 @@ class AqaraFP2Card extends HTMLElement {
           : zoneKey;
     }
 
-    return { zoneKey, zoneId, zoneLabel, globalSensitivity };
+    return { zoneKey, zoneId, zoneLabel, globalSensitivity, isNew };
   }
 
   // Awaited service-call helper mirroring fetchMapConfig()'s
@@ -1081,6 +1085,37 @@ class AqaraFP2Card extends HTMLElement {
       return { success: !!result.success, error: result.error_message };
     } catch (e) {
       console.error(`[FP2 Card] saveZoneToSensor failed:`, e);
+      return { success: false, error: String(e) };
+    }
+  }
+
+  async addZoneToSensor(hass, deviceName, zoneId, sensitivity, zoneType) {
+    const service = `${deviceName}_fp2_add_zone`;
+    try {
+      const response = await hass.callService(
+        "esphome", service,
+        { zone_id: zoneId, sensitivity, zone_type: zoneType },
+        undefined, undefined, true,
+      );
+      const result = (response && response.response) || {};
+      return { success: !!result.success, error: result.error_message };
+    } catch (e) {
+      console.error(`[FP2 Card] addZoneToSensor failed:`, e);
+      return { success: false, error: String(e) };
+    }
+  }
+
+  async removeZoneFromSensor(hass, deviceName, zoneId) {
+    const service = `${deviceName}_fp2_remove_zone`;
+    try {
+      const response = await hass.callService(
+        "esphome", service, { zone_id: zoneId },
+        undefined, undefined, true,
+      );
+      const result = (response && response.response) || {};
+      return { success: !!result.success, error: result.error_message };
+    } catch (e) {
+      console.error(`[FP2 Card] removeZoneFromSensor failed:`, e);
       return { success: false, error: String(e) };
     }
   }
@@ -1135,9 +1170,21 @@ class AqaraFP2Card extends HTMLElement {
       const meta = this.getOrSeedZoneMeta(targets.zoneKey);
       const gridHex = window.FP2Codec.gridToHex(this.editorState[targets.zoneKey]);
       const sensitivity = SENSITIVITY_STRING_TO_INT_JS[meta.presenceSensitivity] || 2;
-      // Unset zoneType is null in editor state; the C++ side's sentinel for
-      // "leave zone_type unchanged" is -1 (09-02-SUMMARY.md).
       const zoneType = meta.zoneType !== null ? meta.zoneType : -1;
+
+      // A dashboard-local zone does not exist in the firmware yet. Create its
+      // persistent runtime slot first, then overwrite the default full grid
+      // with the painted grid using the normal ACK-gated save action.
+      if (targets.isNew) {
+        const created = await this.addZoneToSensor(
+          hass, deviceName, targets.zoneId, sensitivity, zoneType,
+        );
+        if (!created.success) {
+          window.alert(`Create zone failed: ${created.error || "unknown error"}`);
+          return;
+        }
+      }
+
       const result = await this.saveZoneToSensor(
         hass,
         deviceName,
@@ -1147,6 +1194,11 @@ class AqaraFP2Card extends HTMLElement {
         zoneType,
       );
       zoneOk = result.success;
+      if (!result.success && targets.isNew) {
+        // Best-effort rollback so a failed grid write does not leave the
+        // default full-room zone active.
+        await this.removeZoneFromSensor(hass, deviceName, targets.zoneId);
+      }
     }
 
     if (targets.globalSensitivity !== null) {
@@ -1169,6 +1221,16 @@ class AqaraFP2Card extends HTMLElement {
       successMessage = `Saved "${targets.zoneLabel}" to sensor. Applied immediately — not verified by a read-back (this firmware doesn't confirm reads). Will be restored automatically from this device's saved settings on every reboot.`;
     } else {
       successMessage = `Saved Global Zone sensitivity to sensor. Applied immediately — not verified by a read-back (this firmware doesn't confirm reads). Will be restored automatically from this device's saved settings on every reboot.`;
+    }
+
+    if (targets.isNew && zoneOk) {
+      // Replace the local-only key with the now-persisted device zone.
+      await this.fetchMapConfig();
+      this.editorState = {};
+      this.zoneMeta = {};
+      this._deviceZoneCount = null;
+      this.selectedLayer = null;
+      this.updateCard();
     }
     window.alert(successMessage);
   }
@@ -1243,7 +1305,7 @@ class AqaraFP2Card extends HTMLElement {
             </label>
             <input type="number" class="zone-timeout-number" min="1" step="1" />
             <span class="zone-timeout-suffix">seconds</span>
-            <button class="zone-remove-btn" title="Remove this local zone">Remove Zone</button>
+            <button class="zone-remove-btn" title="Remove this zone from the FP2 sensor">Remove Zone</button>
           </div>
           <div class="export-panel">
             <span class="export-panel-caption">Paste below your existing aqara_fp2: configuration</span>
@@ -1827,9 +1889,10 @@ class AqaraFP2Card extends HTMLElement {
 
     const removeBtn = panel.querySelector(".zone-remove-btn");
     if (removeBtn) {
-      // D-02: Remove is only ever offered for locally-added zones — device
-      // zones (zone:N) can never be deleted from the editor.
-      removeBtn.style.display = key.startsWith("zone:new:") ? "" : "none";
+      // Dashboard-managed runtime zones can be removed through the
+      // fp2_remove_zone ESPHome action; local unsaved zones are removed only
+      // from editor state.
+      removeBtn.style.display = key.startsWith("zone:") ? "" : "none";
     }
   }
 
