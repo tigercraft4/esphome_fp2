@@ -58,8 +58,35 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
   // no JSON body parsing is introduced). request->arg("action") returns ""
   // for a missing param (never a crash), so a missing action falls through
   // to the same 400 branch as an unrecognized one.
+  //
+  // CSRF-01 (2026-09-13 review fix): every write action (save/create/
+  // delete/rename) now requires the custom header X-FP2-CSRF: 1. A plain
+  // cross-site <form> auto-submit (the attack this endpoint's own WR-03
+  // comments warned about) cannot set custom request headers at all - forms
+  // only ever send simple headers (Content-Type from a fixed allowlist).
+  // A same-origin/cross-origin fetch() *could* set this header, but this
+  // device's web_server_idf backend never emits any Access-Control-Allow-*
+  // response header (verified: no CORS support in this backend at all), so
+  // a cross-site browser fetch() with a custom header triggers a CORS
+  // preflight that the browser blocks before the real request is ever sent
+  // - there is no Access-Control-Allow-Headers response to authorize it.
+  // This requires no per-session token or server-side state; it only
+  // requires the caller to run same-origin JavaScript (the zones page
+  // itself) or a deliberate non-browser API client, neither of which is
+  // the "any site you visit while on the LAN" attack this closes off.
+  // Read-only actions (list/status/free_slots) are unaffected.
   void handleRequest(esphome::web_server_idf::AsyncWebServerRequest *request) override {
     std::string action = request->arg("action");
+    bool is_write_action = (action == "save" || action == "create" ||
+                            action == "delete" || action == "rename");
+    if (is_write_action) {
+      auto csrf_header = request->get_header("X-FP2-CSRF");
+      if (!csrf_header.has_value() || csrf_header.value() != "1") {
+        ESP_LOGW("aqara_fp2.zones_api", "Rejected %s: missing/invalid X-FP2-CSRF header (CSRF-01)", action.c_str());
+        request->send(403, "application/json", R"({"error":"missing X-FP2-CSRF header"})");
+        return;
+      }
+    }
     if (action == "list") {
       this->handle_get_zones_(request);
     } else if (action == "status") {
@@ -154,8 +181,8 @@ class ZonesApiHandler : public esphome::web_server_idf::AsyncWebHandler {
     const std::string zone_id_str = request->arg("zone_id");
     char *end = nullptr;
     long zone_id_l = strtol(zone_id_str.c_str(), &end, 10);
-    if (end == zone_id_str.c_str() || *end != '\0' || zone_id_l < 0 || zone_id_l > 255) {
-      request->send(400, "application/json", R"({"error":"zone_id must be an integer 0-255"})");
+    if (end == zone_id_str.c_str() || *end != '\0' || zone_id_l < 0 || zone_id_l > 31) {
+      request->send(400, "application/json", R"({"error":"zone_id must be an integer 0-31"})");
       return;
     }
 

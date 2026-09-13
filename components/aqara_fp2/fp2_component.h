@@ -620,6 +620,16 @@ public:
   // compile-time path) - matches the existing compile-time/runtime boundary
   // add/remove already enforce (CR-02, above). Plain pointer read, safe to
   // call cross-task from the httpd handler, mirroring how handle_get_zones_
+  //
+  // INVARIANT (2026-09-13 review note): every direct zone_slot_cache_[id]
+  // access in this file is preceded by a zone_id < 32 bounds check (either
+  // this is_runtime_zone() call, a zones_ active-membership scan, or an
+  // explicit "< 32" comparison). Any NEW caller that indexes
+  // zone_slot_cache_ - e.g. a future HA action alongside
+  // save_zone_to_sensor()/save_global_zone_to_sensor() - MUST route through
+  // is_runtime_zone() or repeat an equivalent bounds check first.
+  // std::array::operator[] itself performs no bounds check; skipping this
+  // is undefined behavior / out-of-bounds read.
   // already reads zones_ state without a lock.
   bool is_runtime_zone(uint8_t zone_id) const {
     return zone_id < 32 && this->zone_slot_cache_[zone_id] != nullptr;

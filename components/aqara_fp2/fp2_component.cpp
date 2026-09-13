@@ -632,6 +632,13 @@ void FP2Component::rehydrate_zone_registry_() {
       zone->sensitivity = ov.sensitivity;
       if (ov.zone_type >= 0) {
         zone->set_zone_type((uint8_t) ov.zone_type);
+      } else {
+        // WR-02 (12-06) parity fix: this reused FP2Zone object may carry a
+        // zone_type set during an earlier add-then-remove cycle this boot.
+        // A rehydrate whose override omits zone_type (sentinel -1) must not
+        // let that stale value leak into this zone's new life, same as
+        // add_zone_at_runtime() already does below - clear the unset marker.
+        zone->has_zone_type = false;
       }
       if (zone->presence_sensor != nullptr) {
         zone->presence_sensor->set_internal(false);
@@ -2447,15 +2454,23 @@ void FP2Component::handle_reverse_read_request_(AttrId attr_id) {
 
   switch (attr_id) {
     case AttrId::DEVICE_DIRECTION:  // device_direction
-      send_reverse_response_(attr_id, (uint8_t)fp2_accel_->get_orientation());
-      ESP_LOGD(TAG, "Sending Device Direction: %d", fp2_accel_->get_orientation());
+      if (fp2_accel_ != nullptr) {
+        send_reverse_response_(attr_id, (uint8_t)fp2_accel_->get_orientation());
+        ESP_LOGD(TAG, "Sending Device Direction: %d", fp2_accel_->get_orientation());
+      } else {
+        ESP_LOGW(TAG, "Reverse Query for Device Direction but no accel configured - ignoring");
+        publish_radar_debug_("reverse_query_no_accel", attr_id, std::vector<uint8_t>{});
+      }
       break;
 
     case AttrId::ANGLE_SENSOR_DATA:  // angle_sensor_data
-      {
+      if (fp2_accel_ != nullptr) {
         uint8_t angle = fp2_accel_->get_output_angle_z();
         send_reverse_response_(attr_id, angle);
         ESP_LOGD(TAG, "Sending Angle Sensor Data: %d", angle);
+      } else {
+        ESP_LOGW(TAG, "Reverse Query for Angle Sensor Data but no accel configured - ignoring");
+        publish_radar_debug_("reverse_query_no_accel", attr_id, std::vector<uint8_t>{});
       }
       break;
 

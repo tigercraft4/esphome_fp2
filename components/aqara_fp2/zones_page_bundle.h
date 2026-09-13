@@ -2038,7 +2038,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
     fetch('/api/zones', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-FP2-CSRF': '1' },
       body: body
     })
       .then(function (resp) {
@@ -2112,7 +2112,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
     fetch('/api/zones', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-FP2-CSRF': '1' },
       body: body
     })
       .then(function (resp) {
@@ -2152,7 +2152,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
     fetch('/api/zones', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-FP2-CSRF': '1' },
       body: 'action=rename&zone_id=' + encodeURIComponent(zoneId) + '&name=' + encodeURIComponent(next)
     })
       .then(function (resp) {
@@ -2221,7 +2221,7 @@ static const char ZONES_PAGE_HTML[] PROGMEM = R"HTML(<!doctype html>
 
     fetch('/api/zones', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-FP2-CSRF': '1' },
       body: body
     })
       .then(function (resp) {
